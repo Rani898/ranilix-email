@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
+import LogoMark from "../components/LogoMark.jsx";
 import { endSession, getSession } from "../lib/session.js";
 import { AuthError, deleteMessage as apiDelete, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
 
@@ -237,10 +238,8 @@ export default function Inbox() {
           <Menu className="h-5 w-5" />
         </button>
         <div className="flex items-center gap-2 lg:w-56">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white">
-            <Mail className="h-5 w-5" />
-          </span>
-          <span className="hidden text-lg font-extrabold tracking-tight text-slate-900 sm:block">{BRAND.short}</span>
+          <LogoMark size={36} />
+          <span className="hidden font-display text-xl font-extrabold tracking-[-0.03em] text-slate-900 sm:block">{BRAND.short}</span>
         </div>
         <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-100 px-3 focus-within:bg-white focus-within:ring-2 focus-within:ring-brand-200">
           <Search className="h-4 w-4 shrink-0 text-slate-500" />
