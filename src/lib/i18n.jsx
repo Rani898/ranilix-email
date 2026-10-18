@@ -11,7 +11,7 @@ function initialLang() {
     const saved = localStorage.getItem(KEY);
     if (saved && DICTS[saved]) return saved;
   } catch { /* ignore */ }
-  return (navigator.language || "").toLowerCase().startsWith("he") ? "he" : "en";
+  return "en"; // English by default; visitors can switch to Hebrew and the choice is remembered
 }
 
 function lookup(dict, key) {
