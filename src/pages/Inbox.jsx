@@ -1,136 +1,83 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  Bell,
+  BellOff,
+  BellRing,
+  Forward,
   Inbox as InboxIcon,
   Loader2,
   LogOut,
   Mail,
   Menu,
+  Paperclip,
   PenSquare,
   RefreshCw,
+  Reply,
+  ReplyAll,
   Search,
   Send,
   Star,
   Trash2,
-  X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
+import Preferences from "../components/Preferences.jsx";
+import Compose from "../components/Compose.jsx";
+import { AttachmentList } from "../components/Attachments.jsx";
 import { endSession, getSession } from "../lib/session.js";
+import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { AuthError, deleteMessage as apiDelete, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
 
 const REFRESH_MS = 30_000;
-
-const FOLDERS = [
-  { id: "inbox", label: "Inbox", icon: InboxIcon },
-  { id: "starred", label: "Starred", icon: Star },
-  { id: "sent", label: "Sent", icon: Send },
-  { id: "trash", label: "Trash", icon: Trash2 },
-];
-
+const FOLDER_ICONS = { inbox: InboxIcon, starred: Star, sent: Send, trash: Trash2 };
 const AVATAR_COLORS = ["bg-brand-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-violet-500", "bg-sky-500"];
 const colorFor = (s) => AVATAR_COLORS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
-
-function formatDate(ts, long = false) {
-  const d = new Date(ts);
-  const now = new Date();
-  if (long) return d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleDateString([], { month: "short", day: "numeric" });
-}
+const notificationsSupported = typeof window !== "undefined" && "Notification" in window;
 
 function Avatar({ name, size = "h-10 w-10 text-sm" }) {
   return (
-    <span className={`grid shrink-0 place-items-center rounded-full font-bold text-white ${size} ${colorFor(name)}`}>
+    <span className={`grid shrink-0 place-items-center rounded-full font-bold text-white ${size} ${colorFor(name)}`} aria-hidden="true">
       {name.trim()[0]?.toUpperCase() || "?"}
     </span>
   );
 }
 
-/* ---------- Compose ---------- */
+/* ---------- Reply / forward helpers ---------- */
 
-function Compose({ from, onClose, onSend }) {
-  const [to, setTo] = useState("");
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
+const splitAddresses = (s) => (s || "").toLowerCase().split(/[,;\s]+/).filter(Boolean);
+const prefixed = (prefix, subject) => (new RegExp(`^${prefix}:`, "i").test(subject) ? subject : `${prefix}: ${subject}`);
 
-  const submit = async (e) => {
-    e.preventDefault();
-    const recipients = to.toLowerCase().split(/[,\s]+/).filter(Boolean);
-    if (!recipients.length) return setError("Add at least one recipient.");
-    const bad = recipients.find((r) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r));
-    if (bad) return setError(`"${bad}" doesn't look like an email address.`);
-    setSending(true);
-    setError("");
-    try {
-      await onSend({ to: recipients.join(", "), subject: subject.trim() || "(no subject)", body });
-    } catch (err) {
-      setError(err.message);
-      setSending(false);
-    }
-  };
+function buildDraft(kind, m, me, t, longDate) {
+  const quoteHeader = t("compose.quoteHeader", { date: longDate(m.date), name: m.from.name, email: m.from.email });
+  const quoted = `\n\n${quoteHeader}\n${m.body.split("\n").map((l) => `> ${l}`).join("\n")}`;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <form
-        onSubmit={submit}
-        onClick={(e) => e.stopPropagation()}
-        className="flex h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-2xl"
-      >
-        <div className="flex items-center justify-between bg-slate-900 px-5 py-3 text-white">
-          <h2 className="font-semibold">New message</h2>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-white/10" aria-label="Close">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="border-b border-slate-200 px-5 py-2.5 text-sm text-slate-500">
-          From <span className="font-medium text-slate-800">{from}</span>
-        </div>
-        <label className="flex items-center gap-3 border-b border-slate-200 px-5">
-          <span className="text-sm text-slate-500">To</span>
-          <input
-            id="compose-to"
-            value={to}
-            onChange={(e) => { setTo(e.target.value); setError(""); }}
-            autoFocus
-            placeholder="name@example.com"
-            className="w-full py-3 text-slate-900 placeholder:text-slate-400 focus:outline-none"
-          />
-        </label>
-        <input
-          id="compose-subject"
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder="Subject"
-          className="border-b border-slate-200 px-5 py-3 font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none"
-        />
-        <textarea
-          id="compose-body"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Write your message…"
-          className="min-h-[14rem] flex-1 resize-none px-5 py-4 leading-relaxed text-slate-800 placeholder:text-slate-400 focus:outline-none"
-        />
-        {error && <p role="alert" className="px-5 pb-2 text-sm text-rose-600">{error}</p>}
-        <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3">
-          <button type="submit" disabled={sending} className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-70">
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {sending ? "Sending…" : "Send"}
-          </button>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Discard">
-            <Trash2 className="h-5 w-5" />
-          </button>
-        </div>
-      </form>
-    </div>
-  );
+  if (kind === "forward") {
+    const header = [
+      t("compose.forwardHeader"),
+      `${t("compose.fwdFrom")}: ${m.from.name} <${m.from.email}>`,
+      `${t("compose.fwdDate")}: ${longDate(m.date)}`,
+      `${t("compose.fwdSubject")}: ${m.subject}`,
+      `${t("compose.fwdTo")}: ${m.to}`,
+    ].join("\n");
+    return { mode: "forward", to: "", subject: prefixed("Fwd", m.subject), body: `\n\n${header}\n\n${m.body}`, forwardAttachments: m.attachments || [] };
+  }
+
+  const fromSent = m.folder === "sent" || m.from.email === me;
+  let to = fromSent ? splitAddresses(m.to) : [m.from.email.toLowerCase()];
+  if (kind === "replyAll") {
+    to = [...new Set([...to, ...splitAddresses(m.to), m.from.email.toLowerCase()])].filter((a) => a !== me);
+    if (!to.length) to = [m.from.email.toLowerCase()];
+  }
+  return { mode: "reply", to: to.join(", "), subject: prefixed("Re", m.subject), body: quoted };
 }
 
 /* ---------- Page ---------- */
 
 export default function Inbox() {
+  const { t, locale } = useI18n();
+  const errorText = useErrorText();
   const session = getSession();
   const navigate = useNavigate();
   const email = session?.email;
@@ -142,51 +89,96 @@ export default function Inbox() {
   const [folder, setFolder] = useState("inbox");
   const [openId, setOpenId] = useState(null);
   const [query, setQuery] = useState("");
-  const [composing, setComposing] = useState(false);
+  const [draft, setDraft] = useState(null); // null = compose closed
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [permission, setPermission] = useState(notificationsSupported ? Notification.permission : "unsupported");
+
+  const seenIds = useRef(null);
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  const shortDate = useCallback((ts) => {
+    const d = new Date(ts);
+    if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
+  }, [locale]);
+  const longDate = useCallback((ts) => new Date(ts).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }), [locale]);
 
   const handleError = useCallback((err) => {
     if (err instanceof AuthError) { endSession(); navigate("/login", { replace: true }); return; }
-    setToast(err.message);
-  }, [navigate]);
+    setToast(errorText(err));
+  }, [navigate, errorText]);
+
+  // Tell the user about mail that arrived since the last check.
+  const announce = useCallback((list) => {
+    const seen = seenIds.current;
+    seenIds.current = new Set(list.map((m) => m.id));
+    if (!seen) return; // first load: nothing is "new"
+    const fresh = list.filter((m) => m.folder === "inbox" && !m.read && !seen.has(m.id) && m.from.email !== email);
+    if (!fresh.length) return;
+    const tt = tRef.current;
+    if (document.hidden && notificationsSupported && Notification.permission === "granted") {
+      for (const m of fresh.slice(0, 3)) {
+        try {
+          const n = new Notification(tt("inbox.newFrom", { name: m.from.name || m.from.email }), {
+            body: m.subject,
+            icon: `${import.meta.env.BASE_URL}favicon.svg`,
+            tag: `ranilix-${m.id}`,
+          });
+          n.onclick = () => { window.focus(); setFolder("inbox"); setOpenId(m.id); n.close(); };
+        } catch { /* some browsers only allow notifications from a service worker */ }
+      }
+    } else {
+      setToast(tt("inbox.newFrom", { name: fresh[0].from.name || fresh[0].from.email }));
+    }
+  }, [email]);
 
   const refresh = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      setMessages(await listMessages());
+      const list = await listMessages();
+      setMessages(list);
+      announce(list);
       setLoadError("");
     } catch (err) {
       if (err instanceof AuthError) return handleError(err);
-      setLoadError(err.message);
+      setLoadError(errorText(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [handleError]);
+  }, [handleError, errorText, announce]);
 
   useEffect(() => {
     if (!email) return;
     refresh();
-    const t = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, REFRESH_MS);
-    return () => clearInterval(t);
+    const timer = setInterval(() => refresh(), REFRESH_MS);
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [email, refresh]);
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(""), 2500);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setToast(""), 3000);
+    return () => clearTimeout(timer);
   }, [toast]);
 
-  const counts = useMemo(() => ({
-    inbox: messages.filter((m) => m.folder === "inbox" && !m.read).length,
-  }), [messages]);
+  const unread = useMemo(() => messages.filter((m) => m.folder === "inbox" && !m.read).length, [messages]);
+
+  // Unread count in the browser tab, e.g. "(3) Inbox · Ranilix".
+  useEffect(() => {
+    const original = document.title;
+    document.title = `${unread ? `(${unread}) ` : ""}${t("inbox.title")} · ${BRAND.short}`;
+    return () => { document.title = original; };
+  }, [unread, t]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return messages
       .filter((m) => (folder === "starred" ? m.starred && m.folder !== "trash" : m.folder === folder))
-      .filter((m) => !q || [m.subject, m.body, m.from.name, m.from.email, m.to].join(" ").toLowerCase().includes(q))
+      .filter((m) => !q || [m.subject, m.body, m.from.name, m.from.email, m.to, ...(m.attachments || []).map((a) => a.filename)].join(" ").toLowerCase().includes(q))
       .sort((a, b) => b.date - a.date);
   }, [messages, folder, query]);
 
@@ -206,10 +198,10 @@ export default function Inbox() {
   const deleteMessage = (m) => {
     if (m.folder === "trash") {
       setMessages((ms) => ms.filter((x) => x.id !== m.id));
-      apiDelete(m.id).then(() => setToast("Message deleted forever")).catch((err) => { handleError(err); refresh(); });
+      apiDelete(m.id).then(() => setToast(t("inbox.deletedForever"))).catch((err) => { handleError(err); refresh(); });
     } else {
       update(m.id, { folder: "trash" });
-      setToast("Moved to Trash");
+      setToast(t("inbox.movedToTrash"));
     }
     setOpenId(null);
   };
@@ -221,91 +213,123 @@ export default function Inbox() {
       if (err instanceof AuthError) return handleError(err);
       throw err; // shown inside the compose window
     }
-    setComposing(false);
-    setToast("Message sent");
+    setDraft(null);
+    setToast(t("inbox.sent"));
     refresh();
+  };
+
+  const enableNotifications = async () => {
+    if (!notificationsSupported) return;
+    try { setPermission(await Notification.requestPermission()); } catch { /* ignore */ }
   };
 
   const logout = async () => { await logOut(); endSession(); navigate("/"); };
 
-  const folderLabel = FOLDERS.find((f) => f.id === folder)?.label;
+  const folderLabel = t(`inbox.folders.${folder}`);
 
   return (
     <div className="flex h-dvh flex-col bg-slate-50">
       {/* Top bar */}
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 sm:px-5">
-        <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label="Open folders">
+      <header className="flex h-16 shrink-0 items-center gap-2 border-b border-slate-200 bg-surface px-3 sm:gap-3 sm:px-5">
+        <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label={t("inbox.openFolders")}>
           <Menu className="h-5 w-5" />
         </button>
-        <div className="flex items-center gap-2 lg:w-56">
+        <div dir="ltr" className="flex items-center gap-2 lg:w-56 rtl:lg:justify-end">
           <LogoMark size={36} />
           <span className="hidden font-display text-xl font-extrabold tracking-[-0.03em] text-slate-900 sm:block">{BRAND.short}</span>
         </div>
-        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-100 px-3 focus-within:bg-white focus-within:ring-2 focus-within:ring-brand-200">
-          <Search className="h-4 w-4 shrink-0 text-slate-500" />
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-100 px-3 focus-within:bg-surface focus-within:ring-2 focus-within:ring-brand-200">
+          <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
           <input
             id="mail-search"
+            dir="auto"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setOpenId(null); }}
-            placeholder="Search mail"
-            className="w-full min-w-0 bg-transparent py-2.5 text-sm focus:outline-none"
+            placeholder={t("inbox.search")}
+            aria-label={t("inbox.search")}
+            className="w-full min-w-0 bg-transparent py-2.5 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none"
           />
         </label>
-        <div className="flex items-center gap-2">
-          <span className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 md:block">{email}</span>
+        <div className="flex items-center gap-1 sm:gap-2">
+          <Preferences compact className="hidden sm:flex" />
+          <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
           <Avatar name={email} size="h-9 w-9 text-sm" />
-          <button onClick={logout} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Log out" title="Log out">
-            <LogOut className="h-5 w-5" />
+          <button onClick={logout} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label={t("inbox.logout")} title={t("inbox.logout")}>
+            <LogOut className="h-5 w-5 rtl:rotate-180" />
           </button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar */}
-        {sidebarOpen && <div className="fixed inset-0 z-30 bg-slate-900/30 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+        {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setSidebarOpen(false)} />}
         <aside
-          className={`fixed inset-y-0 left-0 z-40 w-64 bg-white p-4 transition-transform lg:static lg:z-auto lg:w-60 lg:translate-x-0 lg:bg-transparent lg:shadow-none ${
-            sidebarOpen ? "translate-x-0 shadow-xl" : "-translate-x-full"
+          className={`fixed inset-y-0 start-0 z-40 flex w-64 flex-col overflow-y-auto bg-surface p-4 transition-transform lg:static lg:z-auto lg:w-60 lg:bg-transparent ${
+            sidebarOpen ? "translate-x-0 shadow-xl" : "max-lg:ltr:-translate-x-full max-lg:rtl:translate-x-full"
           }`}
         >
           <button
-            onClick={() => { setComposing(true); setSidebarOpen(false); }}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 px-4 py-3.5 font-semibold text-white shadow-md shadow-brand-600/20 hover:bg-brand-700"
+            onClick={() => { setDraft({ mode: "new" }); setSidebarOpen(false); }}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-600 px-4 py-3.5 font-semibold text-white shadow-md shadow-brand-600/20 hover:bg-brand-500"
           >
-            <PenSquare className="h-5 w-5" /> Compose
+            <PenSquare className="h-5 w-5" /> {t("inbox.compose")}
           </button>
           <nav className="mt-5 space-y-1">
-            {FOLDERS.map(({ id, label, icon: Icon }) => (
+            {Object.entries(FOLDER_ICONS).map(([id, Icon]) => (
               <button
                 key={id}
                 onClick={() => switchFolder(id)}
+                aria-current={folder === id ? "page" : undefined}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                   folder === id ? "bg-brand-100 text-brand-800" : "text-slate-700 hover:bg-slate-100"
                 }`}
               >
                 <Icon className="h-5 w-5" />
-                <span className="flex-1 text-left">{label}</span>
-                {id === "inbox" && counts.inbox > 0 && <span className="text-xs font-bold">{counts.inbox}</span>}
+                <span className="flex-1 text-start">{t(`inbox.folders.${id}`)}</span>
+                {id === "inbox" && unread > 0 && <span className="text-xs font-bold">{unread}</span>}
               </button>
             ))}
           </nav>
-          <p className="mt-8 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
-            Free forever. Your plan costs <strong>$0</strong>.
-          </p>
-          {DEMO_MODE && (
-            <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-              <strong>Preview mode.</strong> Real email isn't connected yet, so messages stay in this browser.
+
+          <div className="mt-6 space-y-3">
+            {permission === "default" && (
+              <button onClick={enableNotifications} className="flex w-full items-start gap-2.5 rounded-xl border border-slate-200 bg-surface p-3 text-start hover:bg-slate-50">
+                <Bell className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">{t("inbox.notifyOn")}</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{t("inbox.notifyOnHint")}</span>
+                </span>
+              </button>
+            )}
+            {permission === "granted" && (
+              <p className="flex items-center gap-2 px-1 text-xs font-medium text-emerald-700">
+                <BellRing className="h-4 w-4" /> {t("inbox.notifyEnabled")}
+              </p>
+            )}
+            {permission === "denied" && (
+              <p className="flex items-start gap-2 px-1 text-xs leading-relaxed text-slate-500">
+                <BellOff className="mt-0.5 h-4 w-4 shrink-0" /> {t("inbox.notifyBlocked")}
+              </p>
+            )}
+            <p className="rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
+              {t("inbox.freePlan", { price: <strong>{t("preview.free").split(",")[0]}</strong> })}
             </p>
-          )}
+            {DEMO_MODE && (
+              <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
+                <strong>{t("inbox.demoTitle")}</strong> {t("inbox.demoText")}
+              </p>
+            )}
+          </div>
+          <Preferences className="mt-auto pt-6 sm:hidden" />
         </aside>
 
         {/* List */}
-        <section className={`min-w-0 flex-1 overflow-y-auto border-slate-200 bg-white lg:max-w-md lg:border-r ${open ? "hidden lg:block" : ""}`}>
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-3 backdrop-blur">
-            <h1 className="truncate text-lg font-bold text-slate-900">{query ? `Results for "${query}"` : folderLabel}</h1>
+        <section className={`min-w-0 flex-1 overflow-y-auto border-slate-200 bg-surface lg:max-w-md lg:border-e ${open ? "hidden lg:block" : ""}`}>
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-surface/95 px-5 py-3 backdrop-blur">
+            <h1 dir="auto" className="truncate text-lg font-bold text-slate-900">{query ? t("inbox.resultsFor", { q: query }) : folderLabel}</h1>
             <div className="flex shrink-0 items-center gap-2">
-              <span className="text-xs text-slate-500">{visible.length} {visible.length === 1 ? "message" : "messages"}</span>
-              <button onClick={() => refresh(true)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Check for new mail" title="Check for new mail">
+              <span className="text-xs text-slate-500">{visible.length === 1 ? t("inbox.countOne") : t("inbox.countMany", { n: visible.length })}</span>
+              <button onClick={() => refresh(true)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label={t("inbox.checkNew")} title={t("inbox.checkNew")}>
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
               </button>
             </div>
@@ -320,41 +344,44 @@ export default function Inbox() {
           ) : visible.length === 0 ? (
             <div className="px-6 py-20 text-center">
               <InboxIcon className="mx-auto h-10 w-10 text-slate-300" />
-              <p className="mt-3 font-semibold text-slate-700">{query ? "No messages match your search" : `Nothing in ${folderLabel} yet`}</p>
-              {folder === "sent" && !query && <p className="mt-1 text-sm text-slate-500">Messages you send will show up here.</p>}
+              <p className="mt-3 font-semibold text-slate-700">{query ? t("inbox.emptySearch") : t("inbox.emptyFolder", { folder: folderLabel })}</p>
+              {folder === "sent" && !query && <p className="mt-1 text-sm text-slate-500">{t("inbox.sentHint")}</p>}
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
               {visible.map((m) => {
-                const who = m.folder === "sent" ? `To: ${m.to}` : m.from.name;
+                const who = m.folder === "sent" ? t("inbox.toPrefix", { to: m.to }) : m.from.name || m.from.email;
                 return (
-                  <li key={m.id}>
-                    <div
-                      role="button"
-                      tabIndex={0}
+                  <li key={m.id} className="relative">
+                    <button
+                      type="button"
                       onClick={() => openMessage(m)}
-                      onKeyDown={(e) => e.key === "Enter" && openMessage(m)}
-                      className={`flex cursor-pointer gap-3 px-5 py-4 transition hover:bg-slate-50 focus:outline-none focus-visible:bg-brand-50 ${
+                      className={`flex w-full gap-3 py-4 ps-5 pe-12 text-start transition hover:bg-slate-50 focus:outline-none focus-visible:bg-brand-50 ${
                         openId === m.id ? "bg-brand-50" : !m.read ? "bg-brand-50/40" : ""
                       }`}
                     >
-                      <Avatar name={m.folder === "sent" ? m.to : m.from.name} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <p className={`truncate text-sm ${m.read ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{who}</p>
-                          <span className={`shrink-0 text-xs ${m.read ? "text-slate-400" : "font-semibold text-brand-700"}`}>{formatDate(m.date)}</span>
-                        </div>
-                        <p className={`truncate text-sm ${m.read ? "text-slate-700" : "font-semibold text-slate-900"}`}>{m.subject}</p>
-                        <p className="truncate text-sm text-slate-500">{m.body.replace(/\n+/g, " ")}</p>
-                      </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); update(m.id, { starred: !m.starred }); }}
-                        className="self-start rounded p-1 text-slate-300 hover:text-amber-400"
-                        aria-label={m.starred ? "Unstar" : "Star"}
-                      >
-                        <Star className={`h-4 w-4 ${m.starred ? "fill-amber-400 text-amber-400" : ""}`} />
-                      </button>
-                    </div>
+                      <Avatar name={m.folder === "sent" ? m.to : m.from.name || m.from.email} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span dir="auto" className={`truncate text-sm ${m.read ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{who}</span>
+                          <span className={`shrink-0 text-xs ${m.read ? "text-slate-500" : "font-semibold text-brand-700"}`}>{shortDate(m.date)}</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span dir="auto" className={`truncate text-sm ${m.read ? "text-slate-700" : "font-semibold text-slate-900"}`}>{m.subject}</span>
+                          {m.attachments?.length > 0 && <Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-label={t("inbox.hasAttachments")} />}
+                        </span>
+                        <span dir="auto" className="block truncate text-sm text-slate-500">{m.body.replace(/\n+/g, " ")}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => update(m.id, { starred: !m.starred })}
+                      className="absolute end-4 top-4 rounded p-1 text-slate-300 hover:text-amber-400"
+                      aria-label={m.starred ? t("inbox.unstar") : t("inbox.star")}
+                      aria-pressed={m.starred}
+                    >
+                      <Star className={`h-4 w-4 ${m.starred ? "fill-amber-400 text-amber-400" : ""}`} />
+                    </button>
                   </li>
                 );
               })}
@@ -363,50 +390,69 @@ export default function Inbox() {
         </section>
 
         {/* Reading pane */}
-        <section className={`min-w-0 flex-1 overflow-y-auto bg-white ${open ? "block" : "hidden lg:block"}`}>
+        <section className={`min-w-0 flex-1 overflow-y-auto bg-surface ${open ? "block" : "hidden lg:block"}`}>
           {open ? (
             <article className="mx-auto max-w-3xl px-5 py-6 sm:px-8">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <button onClick={() => setOpenId(null)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 lg:hidden">
-                  <ArrowLeft className="h-4 w-4" /> Back
+                  <ArrowLeft className="h-4 w-4 rtl:rotate-180" /> {t("inbox.back")}
                 </button>
-                <div className="ml-auto flex gap-1">
-                  <button onClick={() => update(open.id, { starred: !open.starred })} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Star">
+                <div className="ms-auto flex gap-1">
+                  <button onClick={() => update(open.id, { starred: !open.starred })} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label={open.starred ? t("inbox.unstar") : t("inbox.star")} aria-pressed={open.starred}>
                     <Star className={`h-5 w-5 ${open.starred ? "fill-amber-400 text-amber-400" : ""}`} />
                   </button>
-                  <button onClick={() => deleteMessage(open)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label="Delete">
+                  <button onClick={() => deleteMessage(open)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={t("inbox.delete")} title={t("inbox.delete")}>
                     <Trash2 className="h-5 w-5" />
                   </button>
                 </div>
               </div>
-              <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{open.subject}</h2>
+              <h2 dir="auto" className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{open.subject}</h2>
               <div className="mt-5 flex items-center gap-3">
-                <Avatar name={open.from.name} size="h-11 w-11 text-base" />
+                <Avatar name={open.from.name || open.from.email} size="h-11 w-11 text-base" />
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-900">
-                    {open.from.name} <span className="font-normal text-slate-500">&lt;{open.from.email}&gt;</span>
+                    <bdi>{open.from.name}</bdi> <bdi dir="ltr" className="font-normal text-slate-500">&lt;{open.from.email}&gt;</bdi>
                   </p>
-                  <p className="truncate text-sm text-slate-500">to {open.to === email ? "me" : open.to} · {formatDate(open.date, true)}</p>
+                  <p className="truncate text-sm text-slate-500">
+                    {t("inbox.toLine", { to: open.to === email ? t("inbox.me") : <bdi dir="ltr">{open.to}</bdi> })} · {longDate(open.date)}
+                  </p>
                 </div>
               </div>
-              <div className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800">{open.body}</div>
+              <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]">{open.body}</div>
+              <AttachmentList attachments={open.attachments} onError={setToast} />
+
+              <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-200 pt-5">
+                {[
+                  { kind: "reply", icon: Reply, label: t("inbox.reply") },
+                  { kind: "replyAll", icon: ReplyAll, label: t("inbox.replyAll") },
+                  { kind: "forward", icon: Forward, label: t("inbox.forward") },
+                ].map(({ kind, icon: Icon, label }) => (
+                  <button
+                    key={kind}
+                    onClick={() => setDraft(buildDraft(kind, open, email, t, longDate))}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Icon className="h-4 w-4 rtl:-scale-x-100" /> {label}
+                  </button>
+                ))}
+              </div>
             </article>
           ) : (
             <div className="grid h-full place-items-center px-6 text-center">
               <div>
                 <Mail className="mx-auto h-12 w-12 text-slate-300" />
-                <p className="mt-3 font-semibold text-slate-700">Select a message to read it</p>
-                <p className="mt-1 text-sm text-slate-500">Signed in as {email}</p>
+                <p className="mt-3 font-semibold text-slate-700">{t("inbox.select")}</p>
+                <p className="mt-1 text-sm text-slate-500">{t("inbox.signedInAs", { email: <bdi dir="ltr">{email}</bdi> })}</p>
               </div>
             </div>
           )}
         </section>
       </div>
 
-      {composing && <Compose from={email} onClose={() => setComposing(false)} onSend={send} />}
+      {draft && <Compose key={JSON.stringify([draft.mode, draft.subject])} from={email} initial={draft} onClose={() => setDraft(null)} onSend={send} />}
 
       {toast && (
-        <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-medium text-white shadow-lg">
+        <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg">
           {toast}
         </div>
       )}

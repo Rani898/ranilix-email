@@ -6,8 +6,9 @@ import FormField from "../components/FormField.jsx";
 import { BRAND } from "../config.js";
 import { logIn } from "../lib/api.js";
 import { getSession, startSession } from "../lib/session.js";
+import { useErrorText, useI18n } from "../lib/i18n.jsx";
 
-/** Accepts either "name" or "name@ranilix.com". */
+/** Accepts either "name" or "name@ranilix.eu.org". */
 function normalizeEmail(value) {
   const v = value.trim().toLowerCase();
   if (!v) return "";
@@ -15,6 +16,8 @@ function normalizeEmail(value) {
 }
 
 export default function Login() {
+  const { t } = useI18n();
+  const errorText = useErrorText();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -26,7 +29,7 @@ export default function Login() {
     e.preventDefault();
     setError("");
     if (!email.trim() || !password) {
-      setError("Please enter your email and password.");
+      setError(t("validation.fillBoth"));
       return;
     }
     setSubmitting(true);
@@ -35,9 +38,7 @@ export default function Login() {
       startSession(res, remember);
       navigate("/inbox");
     } catch (err) {
-      // Keep this message generic in production so it doesn't reveal which accounts exist.
-      setError(err.message || "That email or password isn't right.");
-    } finally {
+      setError(errorText(err));
       setSubmitting(false);
     }
   };
@@ -46,41 +47,44 @@ export default function Login() {
 
   return (
     <AuthLayout
-      title="Welcome back"
-      subtitle="Log in to your free inbox."
-      footer={<>New here? <Link to="/signup" className="font-semibold text-brand-600 hover:text-brand-700">Create a free email</Link></>}
+      title={t("login.title")}
+      subtitle={t("login.subtitle")}
+      footer={<>{t("login.newHere")} <Link to="/signup" className="font-semibold text-brand-600 hover:text-brand-700">{t("login.create")}</Link></>}
     >
       <form onSubmit={onSubmit} noValidate className="space-y-5">
         <FormField
           id="email"
-          label="Email address"
+          dir="ltr"
+          label={t("login.email")}
           placeholder={`yourname@${BRAND.domain}`}
           autoComplete="username"
           autoFocus
           inputMode="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          hint="You can type just your name — we'll add the rest."
+          hint={t("login.emailHint")}
         />
         <FormField
           id="password"
           type="password"
-          label="Password"
-          placeholder="Your password"
+          dir="ltr"
+          label={t("login.password")}
+          placeholder={t("login.passwordPlaceholder")}
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          right={<a href="#" className="text-sm font-semibold text-brand-600 hover:text-brand-700">Forgot password?</a>}
+          right={<a href="#" className="text-sm font-semibold text-brand-600 hover:text-brand-700">{t("login.forgot")}</a>}
         />
 
         <label className="flex items-center gap-3 text-sm text-slate-600">
           <input
+            id="remember"
             type="checkbox"
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
             className="h-4 w-4 rounded border-slate-300 accent-brand-600"
           />
-          Keep me signed in on this device
+          {t("login.remember")}
         </label>
 
         {error && (
@@ -90,9 +94,9 @@ export default function Login() {
         <button
           type="submit"
           disabled={submitting}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3.5 font-semibold text-white shadow-lg shadow-brand-600/20 transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3.5 font-semibold text-white shadow-lg shadow-brand-600/20 transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {submitting ? <><Loader2 className="h-5 w-5 animate-spin" /> Logging in…</> : <><LogIn className="h-4 w-4" /> Log in</>}
+          {submitting ? <><Loader2 className="h-5 w-5 animate-spin" /> {t("login.submitting")}</> : <><LogIn className="h-4 w-4 rtl:rotate-180" /> {t("login.submit")}</>}
         </button>
       </form>
     </AuthLayout>

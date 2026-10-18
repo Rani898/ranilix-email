@@ -15,5 +15,11 @@ database_name = "ranilix-email"
 # Replace with the id printed by: npx wrangler d1 create ranilix-email
 database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
 
+# File storage for attachments (free, no card needed)
+[[kv_namespaces]]
+binding = "FILES"
+# Replace with the id printed by: npx wrangler kv namespace create FILES
+id = "REPLACE_WITH_YOUR_KV_ID"
+
 [triggers]
 crons = ["0 3 * * *"]

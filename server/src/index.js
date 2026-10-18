@@ -1,6 +1,8 @@
 // Ranilix Email API — Cloudflare Worker
-//  • fetch(): JSON API used by the website (signup, login, inbox, send)
+//  • fetch(): JSON API used by the website (signup, login, inbox, send, attachments)
 //  • email(): receives incoming mail from Cloudflare Email Routing and stores it
+//
+// Errors are returned as { error, code, params } so the site can show them in Hebrew or English.
 
 import PostalMime from "postal-mime";
 
@@ -17,13 +19,17 @@ const USERNAME_MAX = 30;
 const PASSWORD_MIN = 8;
 const PBKDF2_ITERATIONS = 100_000; // Workers' maximum for PBKDF2
 const MAX_BODY_CHARS = 100_000;
-const MAX_INBOUND_BYTES = 10 * 1024 * 1024;
+const MAX_INBOUND_BYTES = 25 * 1024 * 1024;
+const MAX_FILES = 10;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const DAY = 24 * 3600 * 1000;
 
 const enc = new TextEncoder();
 const toHex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 const randomHex = (bytes) => toHex(crypto.getRandomValues(new Uint8Array(bytes)));
 const sha256 = async (s) => toHex(await crypto.subtle.digest("SHA-256", enc.encode(s)));
+const mb = (n) => `${Math.round(n / (1024 * 1024))} MB`;
 
 function safeEqual(a, b) {
   if (a.length !== b.length) return false;
@@ -73,12 +79,23 @@ function htmlToText(html) {
     .trim();
 }
 
+/** Make a file name safe to store and send back in a header. */
+function cleanFilename(name) {
+  const n = String(name || "file").replace(/[\u0000-\u001f\\/:*?"<>|]+/g, "_").trim().slice(0, 150);
+  return n || "file";
+}
+
 /* ------------------------------------------------------------------ */
 /* HTTP plumbing                                                       */
 /* ------------------------------------------------------------------ */
 
 class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, code = "generic", params) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.params = params;
+  }
 }
 
 function corsHeaders(req, env) {
@@ -87,6 +104,7 @@ function corsHeaders(req, env) {
   const h = {
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Expose-Headers": "Content-Disposition",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -108,7 +126,7 @@ async function rateLimit(env, key, limit, windowMs) {
     await env.DB.prepare("INSERT OR REPLACE INTO rate_limits (key, count, window_start) VALUES (?, 1, ?)").bind(key, now).run();
     return;
   }
-  if (row.count >= limit) throw new HttpError(429, "Too many attempts. Please wait a bit and try again.");
+  if (row.count >= limit) throw new HttpError(429, "Too many attempts. Please wait a bit and try again.", "rate_limited");
   await env.DB.prepare("UPDATE rate_limits SET count = count + 1 WHERE key = ?").bind(key).run();
 }
 
@@ -123,15 +141,15 @@ async function createSession(env, userId, remember) {
 async function requireUser(req, env) {
   const auth = req.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!token) throw new HttpError(401, "Please log in.");
+  if (!token) throw new HttpError(401, "Please log in.", "session");
   const row = await env.DB.prepare(
     "SELECT u.id, u.username, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
   ).bind(await sha256(token)).first();
-  if (!row || row.expires_at < Date.now()) throw new HttpError(401, "Your session has ended. Please log in again.");
+  if (!row || row.expires_at < Date.now()) throw new HttpError(401, "Your session has ended. Please log in again.", "session");
   return { id: row.id, username: row.username, email: `${row.username}@${env.MAIL_DOMAIN}` };
 }
 
-const toClientMessage = (m) => ({
+const toClientMessage = (m, attachments = []) => ({
   id: String(m.id),
   folder: m.folder,
   from: { name: m.from_name || m.from_addr, email: m.from_addr },
@@ -141,24 +159,70 @@ const toClientMessage = (m) => ({
   date: m.date,
   read: !!m.is_read,
   starred: !!m.starred,
+  attachments: attachments.map((a) => ({ id: String(a.id), filename: a.filename, mime: a.mime, size: a.size })),
 });
 
+/** Insert a message and return its id. */
 async function insertMessage(env, userId, m) {
-  await env.DB.prepare(
+  const res = await env.DB.prepare(
     "INSERT INTO messages (user_id, folder, from_name, from_addr, to_addr, subject, body, date, is_read, starred) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)"
   ).bind(userId, m.folder, m.fromName || "", m.fromAddr || "", m.to || "", (m.subject || "(no subject)").slice(0, 500),
     (m.body || "").slice(0, MAX_BODY_CHARS), m.date || Date.now(), m.read ? 1 : 0).run();
+  return res.meta.last_row_id;
 }
 
-function welcomeMessage(env, email) {
-  return {
-    folder: "inbox",
-    fromName: "Ranilix Team",
-    fromAddr: `team@${env.MAIL_DOMAIN}`,
-    to: email,
+/** Link already-stored files ({filename, mime, size, kv_key}) to a message. */
+async function linkAttachments(env, userId, messageId, files) {
+  for (const f of files) {
+    await env.DB.prepare("INSERT INTO attachments (user_id, message_id, filename, mime, size, kv_key) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(userId, messageId, f.filename, f.mime, f.size, f.kv_key).run();
+  }
+}
+
+/** Store bytes in KV and return the key. */
+async function storeFile(env, bytes, mime) {
+  if (!env.FILES) throw new HttpError(503, "File storage isn't set up on the server yet.");
+  const key = `att/${randomHex(16)}`;
+  await env.FILES.put(key, bytes, { metadata: { mime } });
+  return key;
+}
+
+/** Delete KV files that no attachment row points to any more. */
+async function cleanupFiles(env, keys) {
+  if (!env.FILES) return;
+  for (const key of new Set(keys)) {
+    const still = await env.DB.prepare("SELECT 1 FROM attachments WHERE kv_key = ? LIMIT 1").bind(key).first();
+    if (!still) await env.FILES.delete(key);
+  }
+}
+
+const WELCOME = {
+  en: (email) => ({
     subject: "Welcome to your new inbox 🎉",
-    body: `Hi there,\n\nYour free address ${email} is ready.\n\nGive it to friends and services you use: emails sent to it will show up right here.\n\nRanilix Email is free forever. No credit card, no hidden fees.\n\nEnjoy,\nThe Ranilix Team`,
-  };
+    body: `Hi there,\n\nYour free address ${email} is ready.\n\nGive it to friends and services you use: emails sent to it will show up right here. You can reply, forward, and attach photos and documents.\n\nRanilix Email is free forever. No credit card, no hidden fees.\n\nEnjoy,\nThe Ranilix Team`,
+  }),
+  he: (email) => ({
+    subject: "ברוכים הבאים לתיבת הדואר החדשה 🎉",
+    body: `היי,\n\nהכתובת החינמית שלך ${email} מוכנה.\n\nתנו אותה לחברים ולשירותים שאתם משתמשים בהם: מיילים שיישלחו אליה יופיעו כאן. אפשר לענות, להעביר ולצרף תמונות ומסמכים.\n\nRanilix Email חינמי לתמיד. בלי כרטיס אשראי ובלי עלויות נסתרות.\n\nתהנו,\nצוות Ranilix`,
+  }),
+};
+
+/** Read the send form: JSON or multipart (with files). */
+async function readSendRequest(req) {
+  const type = req.headers.get("Content-Type") || "";
+  if (type.includes("multipart/form-data")) {
+    const form = await req.formData();
+    const files = form.getAll("files").filter((f) => typeof f === "object" && f !== null && "arrayBuffer" in f);
+    return {
+      to: String(form.get("to") || ""),
+      subject: String(form.get("subject") || ""),
+      body: String(form.get("body") || ""),
+      forward: form.getAll("forward").map(String),
+      files,
+    };
+  }
+  const data = await readJson(req);
+  return { to: data.to, subject: data.subject, body: data.body, forward: data.forward || [], files: [] };
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,22 +234,21 @@ async function route(req, env) {
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const ip = req.headers.get("CF-Connecting-IP") || "local";
 
-  if (path === "/" && req.method === "GET") return json({ ok: true, service: "ranilix-email-api", domain: env.MAIL_DOMAIN });
+  if (path === "/" && req.method === "GET") return json({ ok: true, service: "ranilix-email-api", domain: env.MAIL_DOMAIN, files: !!env.FILES });
 
   if (path === "/api/username-available" && req.method === "GET") {
     const u = (url.searchParams.get("u") || "").toLowerCase();
-    if (validateUsername(u)) return json({ available: false });
-    if (RESERVED.has(u)) return json({ available: false });
+    if (validateUsername(u) || RESERVED.has(u)) return json({ available: false });
     const row = await env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(u).first();
     return json({ available: !row });
   }
 
   if (path === "/api/signup" && req.method === "POST") {
-    const { username, password } = await readJson(req);
+    const { username, password, lang } = await readJson(req);
     const u = String(username || "").toLowerCase();
     const uErr = validateUsername(u);
     if (uErr) throw new HttpError(400, uErr);
-    if (RESERVED.has(u)) throw new HttpError(409, "Sorry, that name is taken. Try another.");
+    if (RESERVED.has(u)) throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
     const pErr = validatePassword(password);
     if (pErr) throw new HttpError(400, pErr);
     await rateLimit(env, `signup:${ip}`, 5, 3600 * 1000);
@@ -198,10 +261,11 @@ async function route(req, env) {
         .bind(u, hash, salt, Date.now()).run();
       userId = res.meta.last_row_id;
     } catch {
-      throw new HttpError(409, "Sorry, that name is taken. Try another.");
+      throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
     }
     const email = `${u}@${env.MAIL_DOMAIN}`;
-    await insertMessage(env, userId, welcomeMessage(env, email));
+    const welcome = (WELCOME[lang] || WELCOME.en)(email);
+    await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
     const token = await createSession(env, userId, true);
     return json({ token, email }, 201);
   }
@@ -212,7 +276,7 @@ async function route(req, env) {
     const u = String(email || "").toLowerCase().trim().replace(new RegExp(`@${env.MAIL_DOMAIN.replace(/\./g, "\\.")}$`), "");
     const user = await env.DB.prepare("SELECT id, username, password_hash, salt FROM users WHERE username = ?").bind(u).first();
     // Same message whether the user exists or not, so accounts can't be discovered.
-    const fail = new HttpError(401, "That email or password isn't right.");
+    const fail = new HttpError(401, "That email or password isn't right.", "bad_login");
     if (!user || typeof password !== "string") throw fail;
     const hash = await hashPassword(password, user.salt);
     if (!safeEqual(hash, user.password_hash)) throw fail;
@@ -234,9 +298,14 @@ async function route(req, env) {
   if (path === "/api/me" && req.method === "GET") return json({ email: user.email });
 
   if (path === "/api/messages" && req.method === "GET") {
-    const { results } = await env.DB.prepare("SELECT * FROM messages WHERE user_id = ? ORDER BY date DESC LIMIT 500")
-      .bind(user.id).all();
-    return json({ messages: results.map(toClientMessage) });
+    const { results } = await env.DB.prepare("SELECT * FROM messages WHERE user_id = ? ORDER BY date DESC LIMIT 500").bind(user.id).all();
+    const { results: atts } = await env.DB.prepare("SELECT id, message_id, filename, mime, size FROM attachments WHERE user_id = ?").bind(user.id).all();
+    const byMessage = new Map();
+    for (const a of atts) {
+      if (!byMessage.has(a.message_id)) byMessage.set(a.message_id, []);
+      byMessage.get(a.message_id).push(a);
+    }
+    return json({ messages: results.map((m) => toClientMessage(m, byMessage.get(m.id))) });
   }
 
   const msgMatch = path.match(/^\/api\/messages\/(\d+)$/);
@@ -249,45 +318,85 @@ async function route(req, env) {
     if (typeof body.starred === "boolean") { sets.push("starred = ?"); vals.push(body.starred ? 1 : 0); }
     if (["inbox", "sent", "trash"].includes(body.folder)) { sets.push("folder = ?"); vals.push(body.folder); }
     if (!sets.length) throw new HttpError(400, "Nothing to update.");
-    const res = await env.DB.prepare(`UPDATE messages SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`)
-      .bind(...vals, id, user.id).run();
-    if (!res.meta.changes) throw new HttpError(404, "Message not found.");
+    const res = await env.DB.prepare(`UPDATE messages SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`).bind(...vals, id, user.id).run();
+    if (!res.meta.changes) throw new HttpError(404, "Message not found.", "not_found");
     return json({ ok: true });
   }
   if (msgMatch && req.method === "DELETE") {
-    const res = await env.DB.prepare("DELETE FROM messages WHERE id = ? AND user_id = ?").bind(Number(msgMatch[1]), user.id).run();
-    if (!res.meta.changes) throw new HttpError(404, "Message not found.");
+    const id = Number(msgMatch[1]);
+    const { results: atts } = await env.DB.prepare("SELECT kv_key FROM attachments WHERE message_id = ? AND user_id = ?").bind(id, user.id).all();
+    await env.DB.prepare("DELETE FROM attachments WHERE message_id = ? AND user_id = ?").bind(id, user.id).run();
+    const res = await env.DB.prepare("DELETE FROM messages WHERE id = ? AND user_id = ?").bind(id, user.id).run();
+    if (!res.meta.changes) throw new HttpError(404, "Message not found.", "not_found");
+    await cleanupFiles(env, atts.map((a) => a.kv_key));
     return json({ ok: true });
   }
 
+  const attMatch = path.match(/^\/api\/attachments\/(\d+)$/);
+  if (attMatch && req.method === "GET") {
+    const att = await env.DB.prepare("SELECT filename, mime, kv_key FROM attachments WHERE id = ? AND user_id = ?").bind(Number(attMatch[1]), user.id).first();
+    if (!att || !env.FILES) throw new HttpError(404, "Not found.", "not_found");
+    const data = await env.FILES.get(att.kv_key, "arrayBuffer");
+    if (!data) throw new HttpError(404, "Not found.", "not_found");
+    // Always download, never render: an attached HTML file must not run as a page.
+    return new Response(data, {
+      headers: {
+        "Content-Type": att.mime.startsWith("image/") && !att.mime.includes("svg") ? att.mime : "application/octet-stream",
+        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(att.filename)}`,
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
+  }
+
   if (path === "/api/send" && req.method === "POST") {
-    const { to, subject, body } = await readJson(req);
-    const recipients = String(to || "").toLowerCase().split(/[,\s]+/).filter(Boolean);
+    const { to, subject, body, forward, files } = await readSendRequest(req);
+    const recipients = [...new Set(String(to || "").toLowerCase().split(/[,;\s]+/).filter(Boolean))];
     if (!recipients.length) throw new HttpError(400, "Add at least one recipient.");
-    if (recipients.length > 10) throw new HttpError(400, "You can send to up to 10 people at once.");
+    if (recipients.length > 10) throw new HttpError(400, "You can send to up to 10 people at once.", "too_many_recipients");
     const bad = recipients.find((r) => !isEmail(r));
     if (bad) throw new HttpError(400, `"${bad}" doesn't look like an email address.`);
-    const external = recipients.filter((r) => !r.endsWith(`@${env.MAIL_DOMAIN}`));
-    if (external.length) {
-      throw new HttpError(400, `Right now you can only send to other @${env.MAIL_DOMAIN} addresses. Sending to other providers is coming soon.`);
+    if (recipients.some((r) => !r.endsWith(`@${env.MAIL_DOMAIN}`))) {
+      throw new HttpError(400, `Right now you can only send to other @${env.MAIL_DOMAIN} addresses.`, "external_send", { domain: env.MAIL_DOMAIN });
+    }
+
+    // Files: limits first, before anything is stored.
+    if (files.length + forward.length > MAX_FILES) throw new HttpError(400, "Too many files.", "too_many_files", { max: MAX_FILES });
+    const tooBig = files.find((f) => f.size > MAX_FILE_BYTES);
+    if (tooBig) throw new HttpError(400, "File too big.", "file_too_big", { name: tooBig.name, max: mb(MAX_FILE_BYTES) });
+    if (files.reduce((s, f) => s + f.size, 0) > MAX_TOTAL_BYTES) throw new HttpError(400, "Files too big.", "total_too_big", { max: mb(MAX_TOTAL_BYTES) });
+
+    const ids = [];
+    for (const r of recipients) {
+      const row = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(r.split("@")[0]).first();
+      if (!row) throw new HttpError(400, `${r} doesn't exist.`, "no_recipient", { email: r });
+      ids.push(row.id);
     }
     await rateLimit(env, `send:${user.id}`, 100, DAY);
 
-    const usernames = recipients.map((r) => r.split("@")[0]);
-    const found = [];
-    for (const name of usernames) {
-      const row = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(name).first();
-      if (!row) throw new HttpError(400, `${name}@${env.MAIL_DOMAIN} doesn't exist.`);
-      found.push(row.id);
+    // Forwarded attachments must belong to the sender; they reuse the stored file.
+    const stored = [];
+    for (const fid of forward) {
+      const a = await env.DB.prepare("SELECT filename, mime, size, kv_key FROM attachments WHERE id = ? AND user_id = ?").bind(Number(fid), user.id).first();
+      if (a) stored.push(a);
     }
+    for (const f of files) {
+      const mime = f.type || "application/octet-stream";
+      stored.push({ filename: cleanFilename(f.name), mime, size: f.size, kv_key: await storeFile(env, await f.arrayBuffer(), mime) });
+    }
+
     const now = Date.now();
     const msg = { fromName: user.username, fromAddr: user.email, to: recipients.join(", "), subject: String(subject || "").trim() || "(no subject)", body: String(body || ""), date: now };
-    await insertMessage(env, user.id, { ...msg, folder: "sent", read: true });
-    for (const id of found) await insertMessage(env, id, { ...msg, folder: "inbox", read: false });
+    const sentId = await insertMessage(env, user.id, { ...msg, folder: "sent", read: true });
+    await linkAttachments(env, user.id, sentId, stored);
+    for (const id of ids) {
+      const inboxId = await insertMessage(env, id, { ...msg, folder: "inbox", read: false });
+      await linkAttachments(env, id, inboxId, stored);
+    }
     return json({ ok: true }, 201);
   }
 
-  throw new HttpError(404, "Not found.");
+  throw new HttpError(404, "Not found.", "not_found");
 }
 
 /* ------------------------------------------------------------------ */
@@ -303,9 +412,15 @@ export default {
       for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
       return res;
     } catch (err) {
-      const status = err instanceof HttpError ? err.status : 500;
-      if (status === 500) console.error(err);
-      return json({ error: status === 500 ? "Something went wrong on our side. Please try again." : err.message }, status, cors);
+      const isHttp = err instanceof HttpError;
+      if (!isHttp) console.error(err);
+      return json(
+        isHttp
+          ? { error: err.message, code: err.code, params: err.params }
+          : { error: "Something went wrong on our side. Please try again.", code: "generic" },
+        isHttp ? err.status : 500,
+        cors,
+      );
     }
   },
 
@@ -322,17 +437,29 @@ export default {
     const raw = await new Response(message.raw).arrayBuffer();
     const parsed = await PostalMime.parse(raw);
     const body = parsed.text?.trim() || (parsed.html ? htmlToText(parsed.html) : "");
-    const attachNote = parsed.attachments?.length ? `\n\n[${parsed.attachments.length} attachment(s) not shown — attachments aren't supported yet]` : "";
 
-    await insertMessage(env, user.id, {
+    // Keep real attachments (skip inline images that are only part of an HTML layout).
+    const files = (parsed.attachments || []).filter((a) => a.disposition !== "inline" || !a.contentId);
+    const kept = [];
+    let skipped = 0;
+    for (const a of files) {
+      const size = a.content?.byteLength ?? 0;
+      if (!env.FILES || kept.length >= MAX_FILES || size === 0 || size > MAX_FILE_BYTES) { skipped++; continue; }
+      const mime = a.mimeType || "application/octet-stream";
+      kept.push({ filename: cleanFilename(a.filename || "attachment"), mime, size, kv_key: await storeFile(env, a.content, mime) });
+    }
+    const note = skipped ? `\n\n[${skipped} attachment(s) were too large or couldn't be saved]` : "";
+
+    const messageId = await insertMessage(env, user.id, {
       folder: "inbox",
       fromName: parsed.from?.name || "",
       fromAddr: parsed.from?.address || message.from,
       to,
       subject: parsed.subject || "(no subject)",
-      body: body + attachNote,
+      body: body + note,
       date: parsed.date ? Date.parse(parsed.date) || Date.now() : Date.now(),
     });
+    await linkAttachments(env, user.id, messageId, kept);
   },
 
   // Daily cleanup of expired sessions and old rate-limit rows

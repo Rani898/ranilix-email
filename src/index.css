@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", "Heebo", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Heebo", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Page surfaces. Use bg-surface instead of bg-white so dark mode works. */
+  --color-surface: #ffffff;
+  /* Always-dark panels (toasts, dark sections) in both themes. */
+  --color-ink: #0f172a;
+
   --color-brand-50: #eef4ff;
   --color-brand-100: #dbe6ff;
   --color-brand-200: #bfd3ff;
@@ -15,10 +23,58 @@
   --color-brand-900: #1e2e89;
 }
 
+/*
+  Dark mode: instead of adding dark: variants to every element, the neutral
+  scale and the light tints are remapped. Light backgrounds (slate-50/100,
+  brand-50, emerald-50…) become dark tints, and dark text (slate-700/900,
+  brand-700…) becomes light. Solid accents (brand-600 buttons) stay the same.
+*/
+:root.dark {
+  color-scheme: dark;
+  --color-surface: #121826;
+  --color-ink: #1b2334;
+
+  --color-slate-50: #0b1018;
+  --color-slate-100: #1a2130;
+  --color-slate-200: #263042;
+  --color-slate-300: #3a465c;
+  --color-slate-400: #6b7a90;
+  --color-slate-500: #8d9ab0;
+  --color-slate-600: #a9b4c6;
+  --color-slate-700: #c5cdd9;
+  --color-slate-800: #dde3eb;
+  --color-slate-900: #eef2f7;
+
+  --color-brand-50: #151d38;
+  --color-brand-100: #1c2750;
+  --color-brand-200: #263569;
+  --color-brand-700: #9db8ff;
+  --color-brand-800: #c3d4ff;
+
+  --color-emerald-50: #0f2a1f;
+  --color-emerald-100: #14382a;
+  --color-emerald-200: #1d4d3a;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+
+  --color-rose-50: #2d1418;
+  --color-rose-200: #5a2430;
+  --color-rose-600: #fb7185;
+  --color-rose-700: #fda4af;
+
+  --color-amber-50: #2b2010;
+  --color-amber-800: #fcd34d;
+}
+
 html {
   scroll-behavior: smooth;
 }
 
 body {
-  @apply bg-white text-slate-900 antialiased;
+  @apply bg-surface text-slate-900 antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

@@ -23,6 +23,12 @@ npx.cmd wrangler d1 create ranilix-email
 ```
 יודפס `database_id = "..."`. פתח את `server\wrangler.toml` והחלף את `REPLACE_WITH_YOUR_DATABASE_ID` במספר הזה.
 
+**3ב. יצירת אחסון לקבצים מצורפים** (חינם, בלי כרטיס אשראי)
+```powershell
+npx.cmd wrangler kv namespace create FILES
+```
+יודפס `id = "..."`. פתח את `server\wrangler.toml` והחלף את `REPLACE_WITH_YOUR_KV_ID` במספר הזה.
+
 **4. יצירת הטבלאות**
 ```powershell
 npx.cmd wrangler d1 execute ranilix-email --remote --file=schema.sql
@@ -56,6 +62,16 @@ npx.cmd wrangler deploy
 **8. בדיקה**
 הירשם באתר (למשל `rani`), ושלח מ-Gmail מייל ל-`rani@ranilix.eu.org`. תוך דקה הוא יופיע בתיבה (או בלחיצה על כפתור הרענון).
 
+## עדכון שרת שכבר הועלה
+אם כבר העלית את השרת לפני כן, אחרי כל עדכון מספיק:
+```powershell
+cd D:\ranilix-email\server
+npx.cmd wrangler d1 execute ranilix-email --remote --file=schema.sql
+npx.cmd wrangler deploy
+```
+(הפקודה הראשונה רק מוסיפה טבלאות חדשות, היא לא מוחקת משתמשים או הודעות.)
+
 ## מה עוד לא עובד
 - **שליחה החוצה** (ל-Gmail וכו'): עוד לא. כרגע אפשר לשלוח רק לכתובות `@ranilix.eu.org`.
-- **קבצים מצורפים**: לא נשמרים, מופיעה הודעה שהיו קבצים.
+- **קבצים מצורפים**: עד 10MB לקובץ, עד 10 קבצים ועד 20MB בסך הכול להודעה. האחסון החינמי של Cloudflare KV מוגבל ל-1GB ולכ-1,000 העלאות ביום.
+- **התראות**: עובדות רק כשהאתר פתוח בלשונית כלשהי בדפדפן.

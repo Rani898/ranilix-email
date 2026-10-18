@@ -5,22 +5,46 @@
 import { API_URL, BRAND, DEMO_MODE } from "../config.js";
 import { getSession } from "./session.js";
 import { loadMailbox, saveMailbox } from "./mailbox.js";
+import { formatBytes } from "./validation.js";
 
-export class AuthError extends Error {}
+/** Error with a translation code (see errors.* in the i18n files). */
+export class ApiError extends Error {
+  constructor(message, code, params) {
+    super(message);
+    this.code = code;
+    this.params = params;
+  }
+}
+export class AuthError extends ApiError {}
 
-async function request(path, { method = "GET", body, auth = false } = {}) {
+// Attachment limits. Demo mode keeps files in browser storage, so it allows much less.
+export const LIMITS = DEMO_MODE
+  ? { maxFiles: 5, maxFile: 1024 * 1024, maxTotal: 3 * 1024 * 1024 }
+  : { maxFiles: 10, maxFile: 10 * 1024 * 1024, maxTotal: 20 * 1024 * 1024 };
+
+/** Returns an ApiError if the files break the limits, else null. */
+export function checkFiles(files) {
+  if (files.length > LIMITS.maxFiles) return new ApiError("", "too_many_files", { max: LIMITS.maxFiles });
+  const big = files.find((f) => f.size > LIMITS.maxFile);
+  if (big) return new ApiError("", "file_too_big", { name: big.name, max: formatBytes(LIMITS.maxFile) });
+  if (files.reduce((s, f) => s + f.size, 0) > LIMITS.maxTotal) return new ApiError("", "total_too_big", { max: formatBytes(LIMITS.maxTotal) });
+  return null;
+}
+
+async function request(path, { method = "GET", body, form, auth = false, raw = false } = {}) {
   const headers = {};
   if (body) headers["Content-Type"] = "application/json";
   if (auth) headers.Authorization = `Bearer ${getSession()?.token || ""}`;
   let res;
   try {
-    res = await fetch(API_URL + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(API_URL + path, { method, headers, body: form || (body ? JSON.stringify(body) : undefined) });
   } catch {
-    throw new Error("Can't reach the server. Check your internet connection and try again.");
+    throw new ApiError("Can't reach the server.", "network");
   }
+  if (raw && res.ok) return res;
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && auth) throw new AuthError(data.error || "Please log in again.");
-  if (!res.ok) throw new Error(data.error || "Something went wrong. Please try again.");
+  if (res.status === 401 && auth) throw new AuthError(data.error || "Please log in again.", "session");
+  if (!res.ok) throw new ApiError(data.error || "Something went wrong.", data.code || "generic", data.params);
   return data;
 }
 
@@ -29,12 +53,18 @@ async function request(path, { method = "GET", body, auth = false } = {}) {
 const RESERVED = new Set(["admin", "support", "help", "info", "root", "postmaster", "abuse", "noreply", "security", "ranilix", "team", "tips"]);
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const demoEmail = () => getSession()?.email;
+const readAsDataUrl = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(r.result);
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(file);
+});
 
 const demo = {
   async checkUsernameAvailable(u) { await delay(300); return !RESERVED.has(u); },
   async signUp({ username }) {
     await delay(700);
-    if (RESERVED.has(username)) throw new Error("Sorry, that name is taken. Try another.");
+    if (RESERVED.has(username)) throw new ApiError("taken", "name_taken");
     return { email: `${username}@${BRAND.domain}`, token: null };
   },
   async logIn({ email }) { await delay(600); return { email, token: null }; },
@@ -48,12 +78,31 @@ const demo = {
     const email = demoEmail();
     saveMailbox(email, loadMailbox(email).filter((m) => m.id !== id));
   },
-  async sendMessage({ to, subject, body }) {
+  async sendMessage({ to, subject, body, files = [], forwardAttachments = [] }) {
+    const err = checkFiles(files);
+    if (err) throw err;
     await delay(400);
     const email = demoEmail();
-    const msg = { id: `m${Date.now()}`, folder: "sent", from: { name: email.split("@")[0], email }, to, subject, body, date: Date.now(), read: true, starred: false };
-    const extra = to.split(", ").includes(email) ? [{ ...msg, id: msg.id + "i", folder: "inbox", read: false }] : [];
-    saveMailbox(email, [msg, ...extra, ...loadMailbox(email)]);
+    const box = loadMailbox(email);
+    const uploaded = await Promise.all(files.map(async (f, i) => ({
+      id: `a${Date.now()}${i}`, filename: f.name, mime: f.type || "application/octet-stream", size: f.size, dataUrl: await readAsDataUrl(f),
+    })));
+    const fwd = forwardAttachments
+      .map((id) => box.flatMap((m) => m.attachments || []).find((a) => a.id === id))
+      .filter(Boolean)
+      .map((a, i) => ({ ...a, id: `f${Date.now()}${i}` }));
+    const attachments = [...uploaded, ...fwd];
+    const msg = { id: `m${Date.now()}`, folder: "sent", from: { name: email.split("@")[0], email }, to, subject, body, date: Date.now(), read: true, starred: false, attachments };
+    const self = to.split(", ").includes(email) ? [{ ...msg, id: msg.id + "i", folder: "inbox", read: false }] : [];
+    try {
+      saveMailbox(email, [msg, ...self, ...box], true);
+    } catch {
+      throw new ApiError("full", "total_too_big", { max: formatBytes(LIMITS.maxTotal) });
+    }
+  },
+  async downloadAttachment(att) {
+    const res = await fetch(att.dataUrl);
+    return res.blob();
   },
 };
 
@@ -64,18 +113,32 @@ const live = {
     const { available } = await request(`/api/username-available?u=${encodeURIComponent(u)}`);
     return available;
   },
-  signUp: ({ username, password }) => request("/api/signup", { method: "POST", body: { username, password } }),
+  signUp: ({ username, password }) => request("/api/signup", { method: "POST", body: { username, password, lang: document.documentElement.lang || "en" } }),
   logIn: ({ email, password, remember }) => request("/api/login", { method: "POST", body: { email, password, remember } }),
   async logOut() { try { await request("/api/logout", { method: "POST", auth: true }); } catch { /* ignore */ } },
   async listMessages() { return (await request("/api/messages", { auth: true })).messages; },
   updateMessage: (id, patch) => request(`/api/messages/${id}`, { method: "PATCH", body: patch, auth: true }),
   deleteMessage: (id) => request(`/api/messages/${id}`, { method: "DELETE", auth: true }),
-  sendMessage: (msg) => request("/api/send", { method: "POST", body: msg, auth: true }),
+  async sendMessage({ to, subject, body, files = [], forwardAttachments = [] }) {
+    const err = checkFiles(files);
+    if (err) throw err;
+    const form = new FormData();
+    form.set("to", to);
+    form.set("subject", subject);
+    form.set("body", body);
+    for (const id of forwardAttachments) form.append("forward", id);
+    for (const f of files) form.append("files", f, f.name);
+    return request("/api/send", { method: "POST", form, auth: true });
+  },
+  async downloadAttachment(att) {
+    const res = await request(`/api/attachments/${att.id}`, { auth: true, raw: true });
+    return res.blob();
+  },
 };
 
 const api = DEMO_MODE ? demo : live;
 
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
-  listMessages, updateMessage, deleteMessage, sendMessage,
+  listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
 } = api;

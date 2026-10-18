@@ -36,3 +36,18 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   count        INTEGER NOT NULL,
   window_start INTEGER NOT NULL
 );
+
+-- File attachments. The file bytes live in Workers KV (binding FILES) under kv_key;
+-- several rows can share one kv_key (e.g. an internal message copied to each recipient).
+CREATE TABLE IF NOT EXISTS attachments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  filename   TEXT NOT NULL,
+  mime       TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size       INTEGER NOT NULL,
+  kv_key     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_user ON attachments(user_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_kv ON attachments(kv_key);

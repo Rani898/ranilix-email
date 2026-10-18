@@ -1,4 +1,5 @@
-// Shared form rules. Keep these in sync with the backend when you build it (Step 2+).
+// Shared form rules (the server checks the same ones).
+// Validators return { key, vars } for the translation, or null when valid.
 
 export const USERNAME_MIN = 3;
 export const USERNAME_MAX = 30;
@@ -9,23 +10,27 @@ export function sanitizeUsername(value) {
   return value.toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, USERNAME_MAX);
 }
 
-/** Returns an error string, or "" when valid. */
 export function validateUsername(u) {
-  if (!u) return "Pick a name for your address.";
-  if (u.length < USERNAME_MIN) return `Use at least ${USERNAME_MIN} characters.`;
-  if (!/^[a-z0-9]/.test(u) || !/[a-z0-9]$/.test(u)) return "Start and end with a letter or number.";
-  if (/[._-]{2,}/.test(u)) return "Avoid two symbols in a row.";
-  return "";
+  if (!u) return { key: "validation.pickName" };
+  if (u.length < USERNAME_MIN) return { key: "validation.minChars", vars: { n: USERNAME_MIN } };
+  if (!/^[a-z0-9]/.test(u) || !/[a-z0-9]$/.test(u)) return { key: "validation.startEnd" };
+  if (/[._-]{2,}/.test(u)) return { key: "validation.doubleSymbol" };
+  return null;
 }
 
-/** Password strength 0–4 plus the checklist used in the UI. */
+/** Password strength 0–4 plus which of the four checks pass (labels come from signup.checks). */
 export function passwordChecks(pw) {
   const checks = [
-    { label: `At least ${PASSWORD_MIN} characters`, ok: pw.length >= PASSWORD_MIN },
-    { label: "Upper & lowercase letters", ok: /[a-z]/.test(pw) && /[A-Z]/.test(pw) },
-    { label: "A number", ok: /\d/.test(pw) },
-    { label: "A symbol (e.g. ! @ #)", ok: /[^A-Za-z0-9]/.test(pw) },
+    pw.length >= PASSWORD_MIN,
+    /[a-z]/.test(pw) && /[A-Z]/.test(pw),
+    /\d/.test(pw),
+    /[^A-Za-z0-9]/.test(pw),
   ];
-  const score = checks.filter((c) => c.ok).length;
-  return { checks, score };
+  return { checks, score: checks.filter(Boolean).length };
+}
+
+export function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
