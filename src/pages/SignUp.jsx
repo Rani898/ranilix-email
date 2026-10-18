@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, Check, CheckCircle2, Loader2, PartyPopper, X } from "lucide-react";
 import AuthLayout from "../components/AuthLayout.jsx";
 import FormField from "../components/FormField.jsx";
 import { BRAND } from "../config.js";
 import { PASSWORD_MIN, passwordChecks, sanitizeUsername, validateUsername } from "../lib/validation.js";
 import { checkUsernameAvailable, signUp } from "../lib/api.js";
+import { startSession } from "../lib/session.js";
 
 const strengthLabel = ["Too weak", "Weak", "Fair", "Good", "Strong"];
 const strengthColor = ["bg-rose-500", "bg-rose-500", "bg-amber-500", "bg-lime-500", "bg-emerald-500"];
@@ -58,6 +59,7 @@ export default function SignUp() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [created, setCreated] = useState(null);
+  const navigate = useNavigate();
 
   const availability = useAvailability(username);
 
@@ -78,6 +80,7 @@ export default function SignUp() {
     setSubmitting(true);
     try {
       const res = await signUp({ username, password });
+      startSession(res.email);
       setCreated(res.email);
     } catch (err) {
       setFormError(err.message || "Something went wrong. Please try again.");
@@ -94,9 +97,9 @@ export default function SignUp() {
           <p className="mt-3 text-sm text-emerald-800">Your new address</p>
           <p className="mt-1 break-all text-xl font-extrabold text-slate-900">{created}</p>
         </div>
-        <Link to="/login" className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3.5 font-semibold text-white hover:bg-brand-700">
-          Go to my inbox <ArrowRight className="h-4 w-4" />
-        </Link>
+        <button onClick={() => navigate("/inbox")} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3.5 font-semibold text-white hover:bg-brand-700">
+          Open my inbox <ArrowRight className="h-4 w-4" />
+        </button>
       </AuthLayout>
     );
   }

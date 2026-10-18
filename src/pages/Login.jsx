@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { CheckCircle2, Loader2, LogIn } from "lucide-react";
+import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Loader2, LogIn } from "lucide-react";
 import AuthLayout from "../components/AuthLayout.jsx";
 import FormField from "../components/FormField.jsx";
 import { BRAND } from "../config.js";
 import { logIn } from "../lib/api.js";
+import { getSession, startSession } from "../lib/session.js";
 
 /** Accepts either "name" or "name@ranilix.com". */
 function normalizeEmail(value) {
@@ -19,7 +20,7 @@ export default function Login() {
   const [remember, setRemember] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [loggedIn, setLoggedIn] = useState(null);
+  const navigate = useNavigate();
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -31,7 +32,8 @@ export default function Login() {
     setSubmitting(true);
     try {
       const res = await logIn({ email: normalizeEmail(email), password, remember });
-      setLoggedIn(res.email);
+      startSession(res.email, remember);
+      navigate("/inbox");
     } catch (err) {
       // Keep this message generic in production so it doesn't reveal which accounts exist.
       setError(err.message || "That email or password isn't right.");
@@ -40,16 +42,7 @@ export default function Login() {
     }
   };
 
-  if (loggedIn) {
-    return (
-      <AuthLayout title="Welcome back!" subtitle="The inbox screen comes in the next step.">
-        <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-          <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-600" />
-          <p className="text-sm text-emerald-900">Signed in as <strong className="break-all">{loggedIn}</strong></p>
-        </div>
-      </AuthLayout>
-    );
-  }
+  if (getSession()) return <Navigate to="/inbox" replace />;
 
   return (
     <AuthLayout

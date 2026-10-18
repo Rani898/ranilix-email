@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import Logo from "./Logo.jsx";
+import { getSession } from "../lib/session.js";
 
 const links = [
   { href: "#features", label: "Features" },
@@ -12,6 +13,7 @@ const links = [
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
+  const signedIn = !!getSession();
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur-lg">
@@ -29,8 +31,8 @@ export default function Navbar() {
         </ul>
 
         <div className="hidden items-center gap-3 md:flex">
-          <Link to="/login" className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">
-            Log in
+          <Link to={signedIn ? "/inbox" : "/login"} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">
+            {signedIn ? "Open inbox" : "Log in"}
           </Link>
           <Link
             to="/signup"
@@ -67,8 +69,8 @@ export default function Navbar() {
             ))}
           </ul>
           <div className="mt-4 grid gap-2">
-            <Link to="/login" className="rounded-lg border border-slate-300 px-4 py-3 text-center font-semibold text-slate-700">
-              Log in
+            <Link to={signedIn ? "/inbox" : "/login"} className="rounded-lg border border-slate-300 px-4 py-3 text-center font-semibold text-slate-700">
+              {signedIn ? "Open inbox" : "Log in"}
             </Link>
             <Link to="/signup" className="rounded-lg bg-brand-600 px-4 py-3 text-center font-semibold text-white">
               Get free email
