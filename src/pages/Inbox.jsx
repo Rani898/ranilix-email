@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Bell,
@@ -18,6 +18,7 @@ import {
   ReplyAll,
   Search,
   Send,
+  ShieldCheck,
   Star,
   Trash2,
 } from "lucide-react";
@@ -26,9 +27,10 @@ import LogoMark from "../components/LogoMark.jsx";
 import Preferences from "../components/Preferences.jsx";
 import Compose from "../components/Compose.jsx";
 import { AttachmentList } from "../components/Attachments.jsx";
+import { AnnouncementBanner } from "../components/ui.jsx";
 import { endSession, getSession } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
-import { AuthError, deleteMessage as apiDelete, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
+import { AuthError, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
 
 const REFRESH_MS = 30_000;
 const FOLDER_ICONS = { inbox: InboxIcon, starred: Star, sent: Send, trash: Trash2 };
@@ -94,6 +96,8 @@ export default function Inbox() {
   const [toast, setToast] = useState("");
   const [permission, setPermission] = useState(notificationsSupported ? Notification.permission : "unsupported");
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [banner, setBanner] = useState(null);
   const seenIds = useRef(null);
   const tRef = useRef(t);
   tRef.current = t;
@@ -158,6 +162,22 @@ export default function Inbox() {
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [email, refresh]);
+
+  // Admin link (only shown to admins; the server still checks every admin request) + site banner.
+  useEffect(() => {
+    if (!email) return;
+    getMe().then((me) => setIsAdmin(!!me.isAdmin)).catch(() => {});
+    getAnnouncement().then((a) => {
+      let dismissed = "";
+      try { dismissed = sessionStorage.getItem("ranilix.banner.dismissed") || ""; } catch { /* ignore */ }
+      if (a.enabled && a.text && a.text !== dismissed) setBanner(a);
+    }).catch(() => {});
+  }, [email]);
+
+  const dismissBanner = () => {
+    try { sessionStorage.setItem("ranilix.banner.dismissed", banner.text); } catch { /* ignore */ }
+    setBanner(null);
+  };
 
   useEffect(() => {
     if (!toast) return;
@@ -251,6 +271,11 @@ export default function Inbox() {
           />
         </label>
         <div className="flex items-center gap-1 sm:gap-2">
+          {isAdmin && (
+            <Link to="/admin" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100" title={t("inbox.adminPanel")} aria-label={t("inbox.adminPanel")}>
+              <ShieldCheck className="h-4 w-4 text-brand-600" /> <span className="hidden md:inline">{t("inbox.adminPanel")}</span>
+            </Link>
+          )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
           <Avatar name={email} size="h-9 w-9 text-sm" />
@@ -259,6 +284,8 @@ export default function Inbox() {
           </button>
         </div>
       </header>
+
+      {banner && <AnnouncementBanner text={banner.text} level={banner.level} onDismiss={dismissBanner} dismissLabel={t("inbox.dismiss")} />}
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar */}

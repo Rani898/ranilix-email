@@ -51,3 +51,31 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_user ON attachments(user_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_kv ON attachments(kv_key);
+
+-- Per-user status kept outside the users table so this file can be re-run safely.
+CREATE TABLE IF NOT EXISTS user_meta (
+  user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  suspended     INTEGER NOT NULL DEFAULT 0,
+  last_login_at INTEGER
+);
+
+-- Announcements the admin sent to every inbox.
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  subject    TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  sent_by    TEXT NOT NULL,
+  recipients INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS broadcast_messages (
+  broadcast_id INTEGER NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+  message_id   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_broadcast_messages ON broadcast_messages(broadcast_id);
+
+-- Site-wide settings (announcement banner, open/closed sign-ups).
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);

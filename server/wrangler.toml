@@ -6,6 +6,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # Your mail domain (must match the domain in Cloudflare Email Routing)
 MAIL_DOMAIN = "ranilix.eu.org"
+# Usernames that can open the admin panel (comma-separated, without @domain)
+ADMIN_USERS = "rani"
 # Sites allowed to call the API (comma-separated)
 ALLOWED_ORIGINS = "https://rani898.github.io,http://localhost:5173,http://localhost:4173"
 

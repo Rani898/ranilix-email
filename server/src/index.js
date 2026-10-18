@@ -102,7 +102,7 @@ function corsHeaders(req, env) {
   const origin = req.headers.get("Origin") || "";
   const allowed = (env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
   const h = {
-    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Expose-Headers": "Content-Disposition",
     "Access-Control-Max-Age": "86400",
@@ -146,6 +146,7 @@ async function requireUser(req, env) {
     "SELECT u.id, u.username, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
   ).bind(await sha256(token)).first();
   if (!row || row.expires_at < Date.now()) throw new HttpError(401, "Your session has ended. Please log in again.", "session");
+  if (await isSuspended(env, row.id)) throw new HttpError(401, "This account is suspended.", "suspended");
   return { id: row.id, username: row.username, email: `${row.username}@${env.MAIL_DOMAIN}` };
 }
 
@@ -226,6 +227,183 @@ async function readSendRequest(req) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Admin helpers                                                       */
+/* ------------------------------------------------------------------ */
+
+const adminSet = (env) => new Set((env.ADMIN_USERS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+const isAdmin = (env, username) => adminSet(env).has(String(username).toLowerCase());
+
+async function getSettings(env) {
+  const { results } = await env.DB.prepare("SELECT key, value FROM settings").all();
+  const s = Object.fromEntries(results.map((r) => [r.key, r.value]));
+  return {
+    signupsOpen: s.signups_open !== "0",
+    announcement: { enabled: s.announcement_enabled === "1", text: s.announcement_text || "", level: s.announcement_level || "info" },
+  };
+}
+const setSetting = (env, key, value) =>
+  env.DB.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, String(value)).run();
+
+const isSuspended = async (env, userId) =>
+  !!(await env.DB.prepare("SELECT 1 FROM user_meta WHERE user_id = ? AND suspended = 1").bind(userId).first());
+
+/** Delete a user with all their mail and files. */
+async function deleteUserCompletely(env, userId) {
+  const { results: atts } = await env.DB.prepare("SELECT kv_key FROM attachments WHERE user_id = ?").bind(userId).all();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM attachments WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM messages WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM user_meta WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
+  ]);
+  await cleanupFiles(env, atts.map((a) => a.kv_key));
+}
+
+async function adminRoute(req, env, admin, path, url) {
+  // GET /api/admin/stats — numbers for the overview page
+  if (path === "/api/admin/stats" && req.method === "GET") {
+    const now = Date.now();
+    const one = (sql, ...args) => env.DB.prepare(sql).bind(...args).first();
+    const [users, suspendedN, new1, new7, active7, msgs, msgs1, storage, bcasts] = await Promise.all([
+      one("SELECT COUNT(*) AS n FROM users"),
+      one("SELECT COUNT(*) AS n FROM user_meta WHERE suspended = 1"),
+      one("SELECT COUNT(*) AS n FROM users WHERE created_at > ?", now - DAY),
+      one("SELECT COUNT(*) AS n FROM users WHERE created_at > ?", now - 7 * DAY),
+      one("SELECT COUNT(*) AS n FROM user_meta WHERE last_login_at > ?", now - 7 * DAY),
+      one("SELECT COUNT(*) AS n FROM messages"),
+      one("SELECT COUNT(*) AS n FROM messages WHERE date > ? AND folder = 'inbox'", now - DAY),
+      one("SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(DISTINCT kv_key) AS files FROM attachments"),
+      one("SELECT COUNT(*) AS n FROM broadcasts"),
+    ]);
+    // Sign-ups per day for the last 14 days (UTC days)
+    const start = new Date(); start.setUTCHours(0, 0, 0, 0);
+    const from = start.getTime() - 13 * DAY;
+    const { results: rows } = await env.DB.prepare(
+      "SELECT CAST((created_at - ?) / 86400000 AS INTEGER) AS d, COUNT(*) AS n FROM users WHERE created_at >= ? GROUP BY d"
+    ).bind(from, from).all();
+    const signups = Array.from({ length: 14 }, (_, i) => ({ day: from + i * DAY, count: rows.find((r) => r.d === i)?.n || 0 }));
+    const settings = await getSettings(env);
+    return json({
+      users: users.n, recipients: users.n - suspendedN.n, newToday: new1.n, newWeek: new7.n, activeWeek: active7.n,
+      messages: msgs.n, receivedToday: msgs1.n, storageBytes: storage.bytes, files: storage.files,
+      broadcasts: bcasts.n, signups, signupsOpen: settings.signupsOpen,
+    });
+  }
+
+  // GET /api/admin/users?q=&offset= — searchable user list
+  if (path === "/api/admin/users" && req.method === "GET") {
+    const q = `%${(url.searchParams.get("q") || "").toLowerCase().replace(/[%_]/g, "")}%`;
+    const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+    const { results } = await env.DB.prepare(`
+      SELECT u.id, u.username, u.created_at,
+             COALESCE(m.suspended, 0) AS suspended, m.last_login_at,
+             (SELECT COUNT(*) FROM messages WHERE user_id = u.id) AS messages,
+             (SELECT COALESCE(SUM(size), 0) FROM attachments WHERE user_id = u.id) AS storage
+      FROM users u LEFT JOIN user_meta m ON m.user_id = u.id
+      WHERE u.username LIKE ?
+      ORDER BY u.created_at DESC LIMIT 50 OFFSET ?`).bind(q, offset).all();
+    const total = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username LIKE ?").bind(q).first();
+    return json({
+      total: total.n,
+      users: results.map((u) => ({
+        id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
+        messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
+      })),
+    });
+  }
+
+  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password))?$/);
+  if (userMatch) {
+    const id = Number(userMatch[1]);
+    const target = await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(id).first();
+    if (!target) throw new HttpError(404, "Not found.", "not_found");
+    const protectedUser = isAdmin(env, target.username);
+
+    if (userMatch[2] === "suspend" && req.method === "POST") {
+      const { suspended } = await readJson(req);
+      if (protectedUser) throw new HttpError(400, "Admins can't be suspended.", "admin_protected");
+      await env.DB.prepare("INSERT INTO user_meta (user_id, suspended) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET suspended = excluded.suspended")
+        .bind(id, suspended ? 1 : 0).run();
+      if (suspended) await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+    if (userMatch[2] === "password" && req.method === "POST") {
+      const { password } = await readJson(req);
+      const pErr = validatePassword(password);
+      if (pErr) throw new HttpError(400, pErr, "weak_password");
+      const salt = randomHex(16);
+      await env.DB.prepare("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?").bind(await hashPassword(password, salt), salt, id).run();
+      await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+    if (!userMatch[2] && req.method === "DELETE") {
+      const { confirm } = await readJson(req);
+      if (protectedUser) throw new HttpError(400, "Admins can't be deleted here.", "admin_protected");
+      if (String(confirm || "").toLowerCase() !== target.username) throw new HttpError(400, "Type the username to confirm.", "confirm_mismatch");
+      await deleteUserCompletely(env, id);
+      return json({ ok: true });
+    }
+  }
+
+  // Broadcasts: GET history, POST send (test → only to the admin)
+  if (path === "/api/admin/broadcasts" && req.method === "GET") {
+    const { results } = await env.DB.prepare(`
+      SELECT b.*, (SELECT COUNT(*) FROM broadcast_messages bm JOIN messages m ON m.id = bm.message_id
+                   WHERE bm.broadcast_id = b.id AND m.is_read = 1) AS read_count
+      FROM broadcasts b ORDER BY b.created_at DESC LIMIT 50`).all();
+    return json({
+      broadcasts: results.map((b) => ({ id: String(b.id), subject: b.subject, body: b.body, createdAt: b.created_at, sentBy: b.sent_by, recipients: b.recipients, read: b.read_count })),
+    });
+  }
+  if (path === "/api/admin/broadcasts" && req.method === "POST") {
+    const { subject, body, test } = await readJson(req);
+    const subj = String(subject || "").trim().slice(0, 300);
+    const text = String(body || "").trim().slice(0, MAX_BODY_CHARS);
+    if (!subj || !text) throw new HttpError(400, "Add a subject and a message.", "broadcast_empty");
+    const now = Date.now();
+    const recipients = test
+      ? [{ id: admin.id, username: admin.username }]
+      : (await env.DB.prepare("SELECT u.id, u.username FROM users u LEFT JOIN user_meta m ON m.user_id = u.id WHERE COALESCE(m.suspended, 0) = 0").all()).results;
+
+    let broadcastId = null;
+    if (!test) {
+      const res = await env.DB.prepare("INSERT INTO broadcasts (subject, body, created_at, sent_by, recipients) VALUES (?, ?, ?, ?, ?)")
+        .bind(subj, text, now, admin.username, recipients.length).run();
+      broadcastId = res.meta.last_row_id;
+    }
+    const from = `team@${env.MAIL_DOMAIN}`;
+    for (let i = 0; i < recipients.length; i += 50) {
+      const chunk = recipients.slice(i, i + 50);
+      const inserted = await env.DB.batch(chunk.map((u) =>
+        env.DB.prepare("INSERT INTO messages (user_id, folder, from_name, from_addr, to_addr, subject, body, date, is_read, starred) VALUES (?, 'inbox', 'Ranilix Team', ?, ?, ?, ?, ?, 0, 0)")
+          .bind(u.id, from, `${u.username}@${env.MAIL_DOMAIN}`, test ? `[Test] ${subj}` : subj, text, now)));
+      if (broadcastId) {
+        await env.DB.batch(inserted.map((r) =>
+          env.DB.prepare("INSERT INTO broadcast_messages (broadcast_id, message_id) VALUES (?, ?)").bind(broadcastId, r.meta.last_row_id)));
+      }
+    }
+    return json({ ok: true, recipients: recipients.length, test: !!test }, 201);
+  }
+
+  // Settings
+  if (path === "/api/admin/settings" && req.method === "GET") return json(await getSettings(env));
+  if (path === "/api/admin/settings" && req.method === "PUT") {
+    const body = await readJson(req);
+    if (typeof body.signupsOpen === "boolean") await setSetting(env, "signups_open", body.signupsOpen ? "1" : "0");
+    if (body.announcement) {
+      const a = body.announcement;
+      if (typeof a.enabled === "boolean") await setSetting(env, "announcement_enabled", a.enabled ? "1" : "0");
+      if (typeof a.text === "string") await setSetting(env, "announcement_text", a.text.slice(0, 500));
+      if (["info", "warning", "success"].includes(a.level)) await setSetting(env, "announcement_level", a.level);
+    }
+    return json(await getSettings(env));
+  }
+
+  throw new HttpError(404, "Not found.", "not_found");
+}
+
+/* ------------------------------------------------------------------ */
 /* Routes                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -235,6 +413,11 @@ async function route(req, env) {
   const ip = req.headers.get("CF-Connecting-IP") || "local";
 
   if (path === "/" && req.method === "GET") return json({ ok: true, service: "ranilix-email-api", domain: env.MAIL_DOMAIN, files: !!env.FILES });
+
+  if (path === "/api/announcement" && req.method === "GET") {
+    const { announcement } = await getSettings(env);
+    return json(announcement.enabled && announcement.text ? announcement : { enabled: false });
+  }
 
   if (path === "/api/username-available" && req.method === "GET") {
     const u = (url.searchParams.get("u") || "").toLowerCase();
@@ -251,6 +434,7 @@ async function route(req, env) {
     if (RESERVED.has(u)) throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
     const pErr = validatePassword(password);
     if (pErr) throw new HttpError(400, pErr);
+    if (!(await getSettings(env)).signupsOpen) throw new HttpError(403, "New sign-ups are paused right now.", "signups_closed");
     await rateLimit(env, `signup:${ip}`, 5, 3600 * 1000);
 
     const salt = randomHex(16);
@@ -266,6 +450,7 @@ async function route(req, env) {
     const email = `${u}@${env.MAIL_DOMAIN}`;
     const welcome = (WELCOME[lang] || WELCOME.en)(email);
     await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
+    await env.DB.prepare("INSERT OR IGNORE INTO user_meta (user_id, last_login_at) VALUES (?, ?)").bind(userId, Date.now()).run();
     const token = await createSession(env, userId, true);
     return json({ token, email }, 201);
   }
@@ -280,6 +465,9 @@ async function route(req, env) {
     if (!user || typeof password !== "string") throw fail;
     const hash = await hashPassword(password, user.salt);
     if (!safeEqual(hash, user.password_hash)) throw fail;
+    if (await isSuspended(env, user.id)) throw new HttpError(403, "This account is suspended.", "suspended");
+    await env.DB.prepare("INSERT INTO user_meta (user_id, last_login_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET last_login_at = excluded.last_login_at")
+      .bind(user.id, Date.now()).run();
     const token = await createSession(env, user.id, remember !== false);
     return json({ token, email: `${user.username}@${env.MAIL_DOMAIN}` });
   }
@@ -295,7 +483,12 @@ async function route(req, env) {
   // ---- Everything below needs a logged-in user ----
   const user = await requireUser(req, env);
 
-  if (path === "/api/me" && req.method === "GET") return json({ email: user.email });
+  if (path === "/api/me" && req.method === "GET") return json({ email: user.email, isAdmin: isAdmin(env, user.username) });
+
+  if (path.startsWith("/api/admin/")) {
+    if (!isAdmin(env, user.username)) throw new HttpError(404, "Not found.", "not_found"); // don't reveal the panel exists
+    return adminRoute(req, env, user, path, url);
+  }
 
   if (path === "/api/messages" && req.method === "GET") {
     const { results } = await env.DB.prepare("SELECT * FROM messages WHERE user_id = ? ORDER BY date DESC LIMIT 500").bind(user.id).all();
@@ -431,7 +624,7 @@ export default {
     if (domain !== env.MAIL_DOMAIN) return message.setReject("Unknown domain");
 
     const user = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(local).first();
-    if (!user) return message.setReject("Address not found");
+    if (!user || (await isSuspended(env, user.id))) return message.setReject("Address not found");
     if (message.rawSize > MAX_INBOUND_BYTES) return message.setReject("Message too large");
 
     const raw = await new Response(message.raw).arrayBuffer();

@@ -31,7 +31,7 @@ export function checkFiles(files) {
   return null;
 }
 
-async function request(path, { method = "GET", body, form, auth = false, raw = false } = {}) {
+export async function request(path, { method = "GET", body, form, auth = false, raw = false } = {}) {
   const headers = {};
   if (body) headers["Content-Type"] = "application/json";
   if (auth) headers.Authorization = `Bearer ${getSession()?.token || ""}`;
@@ -136,9 +136,24 @@ const live = {
   },
 };
 
+// Account info + site announcement
+demo.getMe = async () => {
+  const email = demoEmail();
+  return { email, isAdmin: email?.split("@")[0] === "rani" };
+};
+demo.getAnnouncement = async () => {
+  try {
+    const a = JSON.parse(localStorage.getItem("ranilix.demo.admin") || "{}").settings?.announcement;
+    return a?.enabled && a.text ? a : { enabled: false };
+  } catch { return { enabled: false }; }
+};
+live.getMe = () => request("/api/me", { auth: true });
+live.getAnnouncement = () => request("/api/announcement");
+
 const api = DEMO_MODE ? demo : live;
 
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
+  getMe, getAnnouncement,
 } = api;

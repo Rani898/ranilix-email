@@ -10,6 +10,8 @@
   --color-surface: #ffffff;
   /* Always-dark panels (toasts, dark sections) in both themes. */
   --color-ink: #0f172a;
+  /* Chart bars (validated for contrast on both surfaces). */
+  --color-chart: #2547ea;
 
   --color-brand-50: #eef4ff;
   --color-brand-100: #dbe6ff;
@@ -33,6 +35,7 @@
   color-scheme: dark;
   --color-surface: #121826;
   --color-ink: #1b2334;
+  --color-chart: #5b7cf7;
 
   --color-slate-50: #0b1018;
   --color-slate-100: #1a2130;
