@@ -3,7 +3,7 @@ import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { useI18n } from "../lib/i18n.jsx";
 
 /**
- * Labeled input with error/hint text, optional suffix (e.g. "@ranilix.eu.org") and password show/hide.
+ * Labeled input with error/hint text, optional suffix (e.g. "@ranilix.com") and password show/hide.
  * Email-like fields pass dir="ltr" so addresses read correctly inside Hebrew pages.
  */
 export default function FormField({ id, label, error, hint, suffix, type = "text", right, dir, ...props }) {

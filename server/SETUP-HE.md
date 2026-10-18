@@ -1,6 +1,6 @@
 # הפעלת שרת המיילים של Ranilix
 
-השרת רץ על Cloudflare Workers (חינם). הוא שומר משתמשים והודעות, ומקבל מיילים לכתובות `@ranilix.eu.org`.
+השרת רץ על Cloudflare Workers (חינם). הוא שומר משתמשים והודעות, ומקבל מיילים לכתובות `@ranilix.com`.
 
 > ב-PowerShell תכתוב `npm.cmd` ו-`npx.cmd` (ולא `npm` / `npx`).
 
@@ -38,20 +38,20 @@ npx.cmd wrangler d1 execute ranilix-email --remote --file=schema.sql
 ```powershell
 npx.cmd wrangler deploy
 ```
-בסוף תופיע כתובת כמו `https://ranilix-email-api.SOMETHING.workers.dev`. פתח אותה בדפדפן. אמור להופיע `"ok":true`.
+בסוף יופיעו הכתובות של השרת, כולל `https://api.ranilix.com`. פתח אותה בדפדפן (לפעמים לוקח דקה-שתיים). אמור להופיע `"ok":true`.
 
 **6. חיבור האתר לשרת**
 ב-GitHub: **Settings ← Secrets and variables ← Actions ← לשונית Variables ← New repository variable**
 - Name: `API_URL`
-- Value: הכתובת משלב 5 (בלי `/` בסוף)
+- Value: `https://api.ranilix.com`
 
 אחר כך: **Actions ← Deploy to GitHub Pages ← Run workflow**.
-מעכשיו ההרשמה וההתחברות באתר אמיתיות, ואפשר לשלוח מיילים בין משתמשי `@ranilix.eu.org`.
+מעכשיו ההרשמה וההתחברות באתר אמיתיות, ואפשר לשלוח מיילים בין משתמשי `@ranilix.com`.
 
-## חלק ב׳: אחרי ש-EU.org מאשר את הדומיין (ב-Cloudflare כתוב Active)
+## חלק ב׳: הפעלת קבלת מיילים (הדומיין ranilix.com כבר Active ב-Cloudflare)
 
 **7. הפעלת קבלת מיילים**
-1. ב-https://dash.cloudflare.com ← `ranilix.eu.org` ← **Email** ← **Email Routing** ← **Get started / Enable**.
+1. ב-https://dash.cloudflare.com ← `ranilix.com` ← **Email** ← **Email Routing** ← **Get started / Enable**.
 2. אם הוא מציע להוסיף רשומות MX ו-SPF, תאשר (**Add records and enable**).
 3. אם הוא מבקש "destination address", אפשר לדלג, או להוסיף את המייל הרגיל שלך. זה לא משנה.
 4. **Routing rules ← Catch-all address ← Edit**:
@@ -60,7 +60,7 @@ npx.cmd wrangler deploy
    - לשמור ולוודא שה-Catch-all **Enabled**.
 
 **8. בדיקה**
-הירשם באתר (למשל `rani`), ושלח מ-Gmail מייל ל-`rani@ranilix.eu.org`. תוך דקה הוא יופיע בתיבה (או בלחיצה על כפתור הרענון).
+הירשם באתר (למשל `rani`), ושלח מ-Gmail מייל ל-`rani@ranilix.com`. תוך דקה הוא יופיע בתיבה (או בלחיצה על כפתור הרענון).
 
 ## פאנל הניהול
 - הכתובת: `https://rani898.github.io/ranilix-email/admin` (או הכפתור "פאנל ניהול" בתיבת הדואר, שמופיע רק לך).
@@ -78,6 +78,6 @@ npx.cmd wrangler deploy
 (הפקודה הראשונה רק מוסיפה טבלאות חדשות, היא לא מוחקת משתמשים או הודעות.)
 
 ## מה עוד לא עובד
-- **שליחה החוצה** (ל-Gmail וכו'): עוד לא. כרגע אפשר לשלוח רק לכתובות `@ranilix.eu.org`.
+- **שליחה החוצה** (ל-Gmail וכו'): עוד לא. כרגע אפשר לשלוח רק לכתובות `@ranilix.com`.
 - **קבצים מצורפים**: עד 10MB לקובץ, עד 10 קבצים ועד 20MB בסך הכול להודעה. האחסון החינמי של Cloudflare KV מוגבל ל-1GB ולכ-1,000 העלאות ביום.
 - **התראות**: עובדות רק כשהאתר פתוח בלשונית כלשהי בדפדפן.

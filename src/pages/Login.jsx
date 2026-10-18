@@ -8,7 +8,7 @@ import { logIn } from "../lib/api.js";
 import { getSession, startSession } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 
-/** Accepts either "name" or "name@ranilix.eu.org". */
+/** Accepts either "name" or "name@ranilix.com". */
 function normalizeEmail(value) {
   const v = value.trim().toLowerCase();
   if (!v) return "";

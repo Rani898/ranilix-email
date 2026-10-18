@@ -2,7 +2,7 @@
 export const BRAND = {
   name: "Ranilix Email Free",
   short: "Ranilix",
-  domain: "ranilix.eu.org",
+  domain: "ranilix.com",
 };
 
 // Address of the Ranilix API (Cloudflare Worker). Set VITE_API_URL at build time.
