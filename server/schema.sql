@@ -79,3 +79,6 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Fast "latest message" lookup for the inbox's frequent new-mail check.
+CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id, id);

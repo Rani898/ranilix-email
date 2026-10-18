@@ -5,6 +5,7 @@
 // Errors are returned as { error, code, params } so the site can show them in Hebrew or English.
 
 import PostalMime from "postal-mime";
+import { Buffer } from "node:buffer";
 
 /* ------------------------------------------------------------------ */
 /* Config & helpers                                                    */
@@ -24,6 +25,10 @@ const MAX_FILES = 10;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const DAY = 24 * 3600 * 1000;
+// Sending to other providers (Gmail etc.) goes through Resend. Its free plan allows 100/day,
+// so we stay under that globally and also limit each user, to protect the domain from spam use.
+const OUTBOUND_PER_USER_DAY = 20;
+const OUTBOUND_GLOBAL_DAY = 95;
 
 const enc = new TextEncoder();
 const toHex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -244,6 +249,8 @@ async function getSettings(env) {
   const s = Object.fromEntries(results.map((r) => [r.key, r.value]));
   return {
     signupsOpen: s.signups_open !== "0",
+    outboundEnabled: s.outbound_enabled !== "0",
+    outboundConfigured: !!env.RESEND_API_KEY,
     announcement: { enabled: s.announcement_enabled === "1", text: s.announcement_text || "", level: s.announcement_level || "info" },
   };
 }
@@ -294,6 +301,8 @@ async function adminRoute(req, env, admin, path, url) {
       users: users.n, recipients: users.n - suspendedN.n, newToday: new1.n, newWeek: new7.n, activeWeek: active7.n,
       messages: msgs.n, receivedToday: msgs1.n, storageBytes: storage.bytes, files: storage.files,
       broadcasts: bcasts.n, signups, signupsOpen: settings.signupsOpen,
+      outboundToday: (await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE key = 'out:global'").first().then((r) => (r && now - r.window_start < DAY ? r.count : 0))),
+      outboundLimit: OUTBOUND_GLOBAL_DAY,
     });
   }
 
@@ -397,6 +406,7 @@ async function adminRoute(req, env, admin, path, url) {
   if (path === "/api/admin/settings" && req.method === "PUT") {
     const body = await readJson(req);
     if (typeof body.signupsOpen === "boolean") await setSetting(env, "signups_open", body.signupsOpen ? "1" : "0");
+    if (typeof body.outboundEnabled === "boolean") await setSetting(env, "outbound_enabled", body.outboundEnabled ? "1" : "0");
     if (body.announcement) {
       const a = body.announcement;
       if (typeof a.enabled === "boolean") await setSetting(env, "announcement_enabled", a.enabled ? "1" : "0");
@@ -491,6 +501,12 @@ async function route(req, env) {
 
   if (path === "/api/me" && req.method === "GET") return json({ email: user.email, isAdmin: isAdmin(env, user.username) });
 
+  // Cheap "anything new?" check the inbox calls every few seconds (reads a single row).
+  if (path === "/api/check" && req.method === "GET") {
+    const row = await env.DB.prepare("SELECT id FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT 1").bind(user.id).first();
+    return json({ latest: row ? String(row.id) : null });
+  }
+
   if (path.startsWith("/api/admin/")) {
     if (!isAdmin(env, user.username)) throw new HttpError(404, "Not found.", "not_found"); // don't reveal the panel exists
     return adminRoute(req, env, user, path, url);
@@ -555,8 +571,13 @@ async function route(req, env) {
     if (recipients.length > 10) throw new HttpError(400, "You can send to up to 10 people at once.", "too_many_recipients");
     const bad = recipients.find((r) => !isEmail(r));
     if (bad) throw new HttpError(400, `"${bad}" doesn't look like an email address.`);
-    if (recipients.some((r) => !r.endsWith(`@${env.MAIL_DOMAIN}`))) {
-      throw new HttpError(400, `Right now you can only send to other @${env.MAIL_DOMAIN} addresses.`, "external_send", { domain: env.MAIL_DOMAIN });
+    const external = recipients.filter((r) => !r.endsWith(`@${env.MAIL_DOMAIN}`));
+    const internal = recipients.filter((r) => r.endsWith(`@${env.MAIL_DOMAIN}`));
+    if (external.length) {
+      const settings = await getSettings(env);
+      if (!env.RESEND_API_KEY || !settings.outboundEnabled) {
+        throw new HttpError(400, "Sending to other providers isn't turned on.", "external_send", { domain: env.MAIL_DOMAIN });
+      }
     }
 
     // Files: limits first, before anything is stored.
@@ -566,12 +587,20 @@ async function route(req, env) {
     if (files.reduce((s, f) => s + f.size, 0) > MAX_TOTAL_BYTES) throw new HttpError(400, "Files too big.", "total_too_big", { max: mb(MAX_TOTAL_BYTES) });
 
     const ids = [];
-    for (const r of recipients) {
+    for (const r of internal) {
       const row = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(r.split("@")[0]).first();
       if (!row) throw new HttpError(400, `${r} doesn't exist.`, "no_recipient", { email: r });
       ids.push(row.id);
     }
     await rateLimit(env, `send:${user.id}`, 100, DAY);
+    if (external.length) {
+      try {
+        await rateLimit(env, `out:${user.id}`, OUTBOUND_PER_USER_DAY, DAY);
+        await rateLimit(env, "out:global", OUTBOUND_GLOBAL_DAY, DAY);
+      } catch {
+        throw new HttpError(429, "Daily limit for sending to other providers reached.", "outbound_limit");
+      }
+    }
 
     // Forwarded attachments must belong to the sender; they reuse the stored file.
     const stored = [];
@@ -582,6 +611,36 @@ async function route(req, env) {
     for (const f of files) {
       const mime = f.type || "application/octet-stream";
       stored.push({ filename: cleanFilename(f.name), mime, size: f.size, kv_key: await storeFile(env, await f.arrayBuffer(), mime) });
+    }
+
+    // Deliver to other providers first: if that fails, nothing is saved and the user can retry.
+    if (external.length) {
+      const attachments = [];
+      for (const a of stored) {
+        const data = env.FILES ? await env.FILES.get(a.kv_key, "arrayBuffer") : null;
+        if (data) attachments.push({ filename: a.filename, content: Buffer.from(data).toString("base64") });
+      }
+      let res;
+      try {
+        res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: `${user.username} <${user.email}>`,
+          to: external,
+          subject: String(subject || "").trim() || "(no subject)",
+          text: String(body || ""),
+          ...(attachments.length ? { attachments } : {}),
+        }),
+        });
+      } catch (err) {
+        console.error("Resend unreachable", err);
+        throw new HttpError(502, "The message couldn't be sent to other providers.", "outbound_failed");
+      }
+      if (!res.ok) {
+        console.error("Resend error", res.status, await res.text());
+        throw new HttpError(502, "The message couldn't be sent to other providers.", "outbound_failed");
+      }
     }
 
     const now = Date.now();

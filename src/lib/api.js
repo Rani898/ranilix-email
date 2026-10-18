@@ -149,11 +149,17 @@ demo.getAnnouncement = async () => {
 };
 live.getMe = () => request("/api/me", { auth: true });
 live.getAnnouncement = () => request("/api/announcement");
+// Cheap "is there new mail?" check: returns the id of the newest message.
+live.checkLatest = async () => (await request("/api/check", { auth: true })).latest;
+demo.checkLatest = async () => {
+  const box = loadMailbox(demoEmail());
+  return box.length ? String(box.reduce((a, m) => (m.date > a.date ? m : a)).id) : null;
+};
 
 const api = DEMO_MODE ? demo : live;
 
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
-  getMe, getAnnouncement,
+  getMe, getAnnouncement, checkLatest,
 } = api;

@@ -45,7 +45,7 @@ function seed() {
   return {
     users,
     broadcasts: [{ id: "b1", subject: "Dark mode is here 🌙", body: "Hi!\n\nRanilix now has dark mode.", createdAt: now - 3 * DAY, sentBy: "rani", recipients: 12, read: 8 }],
-    settings: { signupsOpen: true, announcement: { enabled: false, text: "", level: "info" } },
+    settings: { signupsOpen: true, outboundEnabled: true, outboundConfigured: false, announcement: { enabled: false, text: "", level: "info" } },
   };
 }
 function load() {
@@ -121,6 +121,7 @@ const demo = {
   async saveSettings(patch) {
     const s = load();
     if (typeof patch.signupsOpen === "boolean") s.settings.signupsOpen = patch.signupsOpen;
+    if (typeof patch.outboundEnabled === "boolean") s.settings.outboundEnabled = patch.outboundEnabled;
     if (patch.announcement) s.settings.announcement = { ...s.settings.announcement, ...patch.announcement };
     save(s);
     return s.settings;

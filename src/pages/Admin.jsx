@@ -546,7 +546,9 @@ function SettingsTab({ toast }) {
   const [s, setS] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  const [outbound, setOutbound] = useState(null);
   useEffect(() => { adminApi.settings().then(setS).catch((e) => toast(errorText(e))); }, [toast, errorText]);
+  useEffect(() => { adminApi.stats().then((st) => st.outboundLimit && setOutbound({ today: st.outboundToday || 0, limit: st.outboundLimit })).catch(() => {}); }, []);
 
   const save = async (patch) => {
     setSaving(true);
@@ -587,6 +589,19 @@ function SettingsTab({ toast }) {
             </div>
           </div>
           <Button onClick={() => save({ announcement: a })} disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{t("admin.settings.save")}</Button>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-bold text-slate-900">{t("admin.settings.outboundTitle")}</h2>
+        <div className="mt-4 space-y-3">
+          <Toggle id="outbound-enabled" checked={s.outboundEnabled} disabled={saving} onChange={(v) => save({ outboundEnabled: v })} label={t("admin.settings.outboundEnabled")} description={t("admin.settings.outboundText", { domain: BRAND.domain, limit: outbound?.limit ?? 95 })} />
+          {!s.outboundConfigured && (
+            <p className="rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-800">{t("admin.settings.outboundNotConfigured", { domain: BRAND.domain })}</p>
+          )}
+          {outbound && s.outboundConfigured && (
+            <p className="text-sm tabular-nums text-slate-600">{t("admin.settings.outboundUsage", { n: outbound.today, limit: outbound.limit })}</p>
+          )}
         </div>
       </Card>
 

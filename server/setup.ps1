@@ -91,6 +91,20 @@ Step "7/7  Uploading the server"
 Check "Uploading the server"
 Ok "Uploaded"
 
+# 8. Optional: Resend key for sending to Gmail and other providers
+Step "Sending to Gmail and other providers (optional)"
+Write-Host "    If you have a Resend API key (starts with re_), paste it here and press Enter."
+Write-Host "    To skip, just press Enter."
+$secure = Read-Host "    Resend API key" -AsSecureString
+$key = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+if ($key -and $key.Trim().Length -gt 0) {
+  $key.Trim() | & npx.cmd wrangler secret put RESEND_API_KEY
+  Check "Saving the Resend key"
+  Ok "Resend key saved. Sending to other providers is on."
+} else {
+  Ok "Skipped"
+}
+
 # Check it answers
 Step "Checking https://api.ranilix.com (can take a minute the first time)"
 $up = $false

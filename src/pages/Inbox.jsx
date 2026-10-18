@@ -31,9 +31,11 @@ import { AnnouncementBanner } from "../components/ui.jsx";
 import LinkifiedText from "../components/LinkifiedText.jsx";
 import { endSession, getSession } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
-import { AuthError, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
+import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
 
-const REFRESH_MS = 30_000;
+// New-mail check: every few seconds while the tab is visible, once a minute in the background.
+const CHECK_VISIBLE_MS = 5_000;
+const CHECK_HIDDEN_MS = 60_000;
 const FOLDER_ICONS = { inbox: InboxIcon, starred: Star, sent: Send, trash: Trash2 };
 const AVATAR_COLORS = ["bg-brand-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-violet-500", "bg-sky-500"];
 const colorFor = (s) => AVATAR_COLORS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
@@ -155,14 +157,27 @@ export default function Inbox() {
     }
   }, [handleError, errorText, announce]);
 
+  // Poll the cheap check endpoint; load the full list only when something new arrived.
   useEffect(() => {
     if (!email) return;
-    refresh();
-    const timer = setInterval(() => refresh(), REFRESH_MS);
-    const onFocus = () => refresh();
-    window.addEventListener("focus", onFocus);
-    return () => { clearInterval(timer); window.removeEventListener("focus", onFocus); };
-  }, [email, refresh]);
+    let stopped = false;
+    let timer;
+    let latest;
+    const tick = async () => {
+      try {
+        const now = await checkLatest();
+        if (latest !== undefined && now !== latest) await refresh();
+        latest = now;
+      } catch (err) {
+        if (err instanceof AuthError) return handleError(err);
+      }
+      if (!stopped) timer = setTimeout(tick, document.hidden ? CHECK_HIDDEN_MS : CHECK_VISIBLE_MS);
+    };
+    refresh().then(tick);
+    const onVisible = () => { if (!document.hidden) { clearTimeout(timer); tick(); } };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { stopped = true; clearTimeout(timer); document.removeEventListener("visibilitychange", onVisible); };
+  }, [email, refresh, handleError]);
 
   // Admin link (only shown to admins; the server still checks every admin request) + site banner.
   useEffect(() => {
