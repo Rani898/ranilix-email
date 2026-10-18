@@ -69,6 +69,12 @@ const isEmail = (s) => /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(s);
 function htmlToText(html) {
   return html
     .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, "")
+    // Keep link targets (verification buttons etc.): <a href="URL">Verify</a> → "Verify (URL)"
+    .replace(/<a\b[^>]*?href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, inner) => {
+      const label = inner.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+      if (!/^https?:/i.test(href)) return label;
+      return !label || label === href ? ` ${href} ` : `${label} (${href})`;
+    })
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
     .replace(/<li[^>]*>/gi, "• ")

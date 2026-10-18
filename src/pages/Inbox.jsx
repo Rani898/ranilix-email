@@ -28,6 +28,7 @@ import Preferences from "../components/Preferences.jsx";
 import Compose from "../components/Compose.jsx";
 import { AttachmentList } from "../components/Attachments.jsx";
 import { AnnouncementBanner } from "../components/ui.jsx";
+import LinkifiedText from "../components/LinkifiedText.jsx";
 import { endSession, getSession } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { AuthError, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
@@ -445,7 +446,7 @@ export default function Inbox() {
                   </p>
                 </div>
               </div>
-              <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]">{open.body}</div>
+              <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]"><LinkifiedText text={open.body} /></div>
               <AttachmentList attachments={open.attachments} onError={setToast} />
 
               <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-200 pt-5">
