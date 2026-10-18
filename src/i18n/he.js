@@ -1,5 +1,12 @@
 // מחרוזות בעברית. המפתחות חייבים להתאים ל-en.js.
 export default {
+  onboarding: {
+    themeTitle: "בחרו צבע רקע",
+    themeHint: "אפשר לשנות את זה בכל רגע מהתפריט העליון.",
+    light: "בהיר",
+    dark: "כהה",
+    back: "חזרה",
+  },
   prefs: {
     language: "English",
     languageLabel: "Switch to English",

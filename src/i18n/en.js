@@ -1,5 +1,12 @@
 // English strings. Keys must match he.js. Use {name} for values filled in at runtime.
 export default {
+  onboarding: {
+    themeTitle: "Choose a background",
+    themeHint: "You can change this anytime from the top menu.",
+    light: "Light",
+    dark: "Dark",
+    back: "Back",
+  },
   prefs: {
     language: "עברית",
     languageLabel: "Switch to Hebrew",
