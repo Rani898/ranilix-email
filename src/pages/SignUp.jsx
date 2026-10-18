@@ -41,8 +41,12 @@ function useAvailability(username) {
     let cancelled = false;
     setStatus("checking");
     const t = setTimeout(async () => {
-      const ok = await checkUsernameAvailable(username);
-      if (!cancelled) setStatus(ok ? "available" : "taken");
+      try {
+        const ok = await checkUsernameAvailable(username);
+        if (!cancelled) setStatus(ok ? "available" : "taken");
+      } catch {
+        if (!cancelled) setStatus("unknown"); // server unreachable: let the sign-up request decide
+      }
     }, 350);
     return () => { cancelled = true; clearTimeout(t); };
   }, [username]);
@@ -69,7 +73,7 @@ export default function SignUp() {
     confirm: confirm !== password ? "Passwords don't match." : "",
     agree: agree ? "" : "Please accept the terms to continue.",
   };
-  const isValid = Object.values(errors).every((e) => !e) && availability === "available";
+  const isValid = Object.values(errors).every((e) => !e) && (availability === "available" || availability === "unknown");
   const show = (field) => (touched[field] || touched.submit) && errors[field];
 
   const onSubmit = async (e) => {
@@ -80,7 +84,7 @@ export default function SignUp() {
     setSubmitting(true);
     try {
       const res = await signUp({ username, password });
-      startSession(res.email);
+      startSession(res);
       setCreated(res.email);
     } catch (err) {
       setFormError(err.message || "Something went wrong. Please try again.");

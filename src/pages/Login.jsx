@@ -32,7 +32,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       const res = await logIn({ email: normalizeEmail(email), password, remember });
-      startSession(res.email, remember);
+      startSession(res, remember);
       navigate("/inbox");
     } catch (err) {
       // Keep this message generic in production so it doesn't reveal which accounts exist.

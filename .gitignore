@@ -1,4 +1,7 @@
 node_modules
 dist
 dist-single
+dist-live
+.wrangler
+.dev.vars
 .DS_Store

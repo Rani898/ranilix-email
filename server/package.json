@@ -1,0 +1,17 @@
+{
+  "name": "ranilix-email-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute ranilix-email --remote --file=schema.sql",
+    "db:init:local": "wrangler d1 execute ranilix-email --local --file=schema.sql"
+  },
+  "dependencies": {
+    "postal-mime": "^2.4.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

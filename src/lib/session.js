@@ -1,5 +1,5 @@
-// TEMPORARY client-side session for the demo. A real backend will replace this with
-// an HttpOnly session cookie — never trust client storage for real authentication.
+// Keeps the signed-in user's email and API token in the browser.
+// "Remember me" → localStorage; otherwise sessionStorage (cleared when the tab closes).
 
 const KEY = "ranilix.session";
 
@@ -11,11 +11,12 @@ export function getSession() {
   return safeGet(localStorage) || safeGet(sessionStorage);
 }
 
-export function startSession(email, remember = true) {
-  const data = JSON.stringify({ email, at: Date.now() });
+export function startSession({ email, token = null }, remember = true) {
+  const data = JSON.stringify({ email, token, at: Date.now() });
   try {
+    endSession();
     (remember ? localStorage : sessionStorage).setItem(KEY, data);
-  } catch { /* storage blocked — session lasts until refresh */ }
+  } catch { /* storage blocked */ }
 }
 
 export function endSession() {

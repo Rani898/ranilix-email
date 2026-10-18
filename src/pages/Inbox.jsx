@@ -1,21 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Inbox as InboxIcon,
+  Loader2,
   LogOut,
   Mail,
   Menu,
   PenSquare,
+  RefreshCw,
   Search,
   Send,
   Star,
   Trash2,
   X,
 } from "lucide-react";
-import { BRAND } from "../config.js";
+import { BRAND, DEMO_MODE } from "../config.js";
 import { endSession, getSession } from "../lib/session.js";
-import { loadMailbox, saveMailbox } from "../lib/mailbox.js";
+import { AuthError, deleteMessage as apiDelete, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
+
+const REFRESH_MS = 30_000;
 
 const FOLDERS = [
   { id: "inbox", label: "Inbox", icon: InboxIcon },
@@ -50,14 +54,22 @@ function Compose({ from, onClose, onSend }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const recipients = to.split(/[,\s]+/).filter(Boolean);
+    const recipients = to.toLowerCase().split(/[,\s]+/).filter(Boolean);
     if (!recipients.length) return setError("Add at least one recipient.");
     const bad = recipients.find((r) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r));
     if (bad) return setError(`"${bad}" doesn't look like an email address.`);
-    onSend({ to: recipients.join(", "), subject: subject.trim() || "(no subject)", body });
+    setSending(true);
+    setError("");
+    try {
+      await onSend({ to: recipients.join(", "), subject: subject.trim() || "(no subject)", body });
+    } catch (err) {
+      setError(err.message);
+      setSending(false);
+    }
   };
 
   return (
@@ -103,8 +115,8 @@ function Compose({ from, onClose, onSend }) {
         />
         {error && <p role="alert" className="px-5 pb-2 text-sm text-rose-600">{error}</p>}
         <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3">
-          <button type="submit" className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-700">
-            <Send className="h-4 w-4" /> Send
+          <button type="submit" disabled={sending} className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 font-semibold text-white hover:bg-brand-700 disabled:opacity-70">
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {sending ? "Sending…" : "Send"}
           </button>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Discard">
             <Trash2 className="h-5 w-5" />
@@ -122,7 +134,10 @@ export default function Inbox() {
   const navigate = useNavigate();
   const email = session?.email;
 
-  const [messages, setMessages] = useState(() => (email ? loadMailbox(email) : []));
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [folder, setFolder] = useState("inbox");
   const [openId, setOpenId] = useState(null);
   const [query, setQuery] = useState("");
@@ -130,7 +145,32 @@ export default function Inbox() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState("");
 
-  useEffect(() => { if (email) saveMailbox(email, messages); }, [email, messages]);
+  const handleError = useCallback((err) => {
+    if (err instanceof AuthError) { endSession(); navigate("/login", { replace: true }); return; }
+    setToast(err.message);
+  }, [navigate]);
+
+  const refresh = useCallback(async (manual = false) => {
+    if (manual) setRefreshing(true);
+    try {
+      setMessages(await listMessages());
+      setLoadError("");
+    } catch (err) {
+      if (err instanceof AuthError) return handleError(err);
+      setLoadError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [handleError]);
+
+  useEffect(() => {
+    if (!email) return;
+    refresh();
+    const t = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, REFRESH_MS);
+    return () => clearInterval(t);
+  }, [email, refresh]);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(""), 2500);
@@ -152,7 +192,12 @@ export default function Inbox() {
   if (!email) return <Navigate to="/login" replace />;
 
   const open = messages.find((m) => m.id === openId);
-  const update = (id, patch) => setMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+
+  // Optimistic update: change the screen right away, then save on the server.
+  const update = (id, patch) => {
+    setMessages((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    updateMessage(id, patch).catch((err) => { handleError(err); refresh(); });
+  };
 
   const openMessage = (m) => { setOpenId(m.id); if (!m.read) update(m.id, { read: true }); };
   const switchFolder = (id) => { setFolder(id); setOpenId(null); setSidebarOpen(false); };
@@ -160,34 +205,27 @@ export default function Inbox() {
   const deleteMessage = (m) => {
     if (m.folder === "trash") {
       setMessages((ms) => ms.filter((x) => x.id !== m.id));
-      setToast("Message deleted forever");
+      apiDelete(m.id).then(() => setToast("Message deleted forever")).catch((err) => { handleError(err); refresh(); });
     } else {
-      update(m.id, { folder: "trash", prevFolder: m.folder });
+      update(m.id, { folder: "trash" });
       setToast("Moved to Trash");
     }
     setOpenId(null);
   };
 
-  const send = ({ to, subject, body }) => {
-    const msg = {
-      id: `m${Date.now()}`,
-      folder: "sent",
-      from: { name: "Me", email },
-      to,
-      subject,
-      body,
-      date: Date.now(),
-      read: true,
-      starred: false,
-    };
-    // Mail sent to your own address also lands in your inbox, so the demo feels real.
-    const self = to.split(", ").includes(email) ? [{ ...msg, id: msg.id + "i", folder: "inbox", read: false, from: { name: email.split("@")[0], email } }] : [];
-    setMessages((ms) => [msg, ...self, ...ms]);
+  const send = async (msg) => {
+    try {
+      await sendMessage(msg);
+    } catch (err) {
+      if (err instanceof AuthError) return handleError(err);
+      throw err; // shown inside the compose window
+    }
     setComposing(false);
     setToast("Message sent");
+    refresh();
   };
 
-  const logout = () => { endSession(); navigate("/"); };
+  const logout = async () => { await logOut(); endSession(); navigate("/"); };
 
   const folderLabel = FOLDERS.find((f) => f.id === folder)?.label;
 
@@ -255,15 +293,32 @@ export default function Inbox() {
           <p className="mt-8 rounded-xl bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
             Free forever. Your plan costs <strong>$0</strong>.
           </p>
+          {DEMO_MODE && (
+            <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
+              <strong>Preview mode.</strong> Real email isn't connected yet, so messages stay in this browser.
+            </p>
+          )}
         </aside>
 
         {/* List */}
         <section className={`min-w-0 flex-1 overflow-y-auto border-slate-200 bg-white lg:max-w-md lg:border-r ${open ? "hidden lg:block" : ""}`}>
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-3 backdrop-blur">
-            <h1 className="text-lg font-bold text-slate-900">{query ? `Results for "${query}"` : folderLabel}</h1>
-            <span className="text-xs text-slate-500">{visible.length} {visible.length === 1 ? "message" : "messages"}</span>
+            <h1 className="truncate text-lg font-bold text-slate-900">{query ? `Results for "${query}"` : folderLabel}</h1>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs text-slate-500">{visible.length} {visible.length === 1 ? "message" : "messages"}</span>
+              <button onClick={() => refresh(true)} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" aria-label="Check for new mail" title="Check for new mail">
+                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
-          {visible.length === 0 ? (
+          {loadError && (
+            <p role="alert" className="mx-5 mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{loadError}</p>
+          )}
+          {loading ? (
+            <div className="grid place-items-center py-20 text-slate-400">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          ) : visible.length === 0 ? (
             <div className="px-6 py-20 text-center">
               <InboxIcon className="mx-auto h-10 w-10 text-slate-300" />
               <p className="mt-3 font-semibold text-slate-700">{query ? "No messages match your search" : `Nothing in ${folderLabel} yet`}</p>
