@@ -156,10 +156,24 @@ demo.checkLatest = async () => {
   return box.length ? String(box.reduce((a, m) => (m.date > a.date ? m : a)).id) : null;
 };
 
+// "Connect Google": read the user's Gmail inside Ranilix (needs the live server).
+live.googleStatus = () => request("/api/google/status", { auth: true });
+live.googleStart = (returnTo) => request("/api/google/start", { method: "POST", body: { returnTo }, auth: true });
+live.googleDisconnect = () => request("/api/google/disconnect", { method: "POST", auth: true });
+live.gmailList = ({ q = "", pageToken = "" } = {}) =>
+  request(`/api/google/messages?${new URLSearchParams({ ...(q && { q }), ...(pageToken && { pageToken }) })}`, { auth: true });
+live.gmailGet = (id) => request(`/api/google/messages/${encodeURIComponent(id)}`, { auth: true });
+demo.googleStatus = async () => ({ configured: false, connected: false, email: "", demo: true });
+demo.googleStart = async () => { throw new ApiError("", "google_not_configured"); };
+demo.googleDisconnect = async () => ({ ok: true });
+demo.gmailList = async () => ({ messages: [], nextPageToken: null });
+demo.gmailGet = async () => { throw new ApiError("", "google_not_connected"); };
+
 const api = DEMO_MODE ? demo : live;
 
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
   getMe, getAnnouncement, checkLatest,
+  googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
 } = api;

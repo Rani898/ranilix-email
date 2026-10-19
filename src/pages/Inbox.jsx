@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Bell,
@@ -25,6 +25,7 @@ import { BRAND, DEMO_MODE } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
 import SenderAvatar from "../components/SenderAvatar.jsx";
 import AccountMenu from "../components/AccountMenu.jsx";
+import GmailView, { GoogleMark } from "../components/GmailView.jsx";
 import Preferences from "../components/Preferences.jsx";
 import Compose from "../components/Compose.jsx";
 import { AttachmentList } from "../components/Attachments.jsx";
@@ -100,6 +101,7 @@ function Inbox() {
   const [permission, setPermission] = useState(notificationsSupported ? Notification.permission : "unsupported");
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [params, setParams] = useSearchParams();
   const [banner, setBanner] = useState(null);
   const seenIds = useRef(null);
   const tRef = useRef(t);
@@ -189,6 +191,16 @@ function Inbox() {
       if (a.enabled && a.text && a.text !== dismissed) setBanner(a);
     }).catch(() => {});
   }, [email]);
+
+  // Back from Google's sign-in screen: open the Gmail folder and say how it went.
+  useEffect(() => {
+    const result = params.get("gmail");
+    if (!result) return;
+    setFolder("gmail");
+    const key = { connected: "connectedToast", cancelled: "cancelledToast", noscope: "noscopeToast" }[result] || "errorToast";
+    setToast(tRef.current(`gmail.${key}`));
+    setParams({}, { replace: true });
+  }, [params, setParams]);
 
   const dismissBanner = () => {
     try { sessionStorage.setItem("ranilix.banner.dismissed", banner.text); } catch { /* ignore */ }
@@ -336,6 +348,18 @@ function Inbox() {
             ))}
           </nav>
 
+          <p className="mt-6 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">{t("gmail.connected")}</p>
+          <button
+            onClick={() => switchFolder("gmail")}
+            aria-current={folder === "gmail" ? "page" : undefined}
+            className={`mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+              folder === "gmail" ? "bg-brand-100 text-brand-800" : "text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <span className="grid h-5 w-5 place-items-center"><GoogleMark size={18} /></span>
+            <span className="flex-1 text-start">{t("gmail.folder")}</span>
+          </button>
+
           <div className="mt-6 space-y-3">
             {permission === "default" && (
               <button onClick={enableNotifications} className="flex w-full items-start gap-2.5 rounded-xl border border-slate-200 bg-surface p-3 text-start hover:bg-slate-50">
@@ -368,6 +392,18 @@ function Inbox() {
           <Preferences className="mt-auto pt-6 sm:hidden" />
         </aside>
 
+        {folder === "gmail" ? (
+          <GmailView
+            query={query}
+            onToast={setToast}
+            onReply={(g) => setDraft({
+              mode: "reply",
+              to: g.from.email,
+              subject: /^re:/i.test(g.subject) ? g.subject : `Re: ${g.subject}`,
+              body: `\n\n${t("compose.quoteHeader", { date: longDate(g.date), name: g.from.name, email: g.from.email })}\n${g.body.split("\n").map((l) => `> ${l}`).join("\n")}`,
+            })}
+          />
+        ) : (<>
         {/* List */}
         <section className={`min-w-0 flex-1 overflow-y-auto border-slate-200 bg-surface lg:max-w-md lg:border-e ${open ? "hidden lg:block" : ""}`}>
           <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-100 bg-surface/95 px-5 py-3 backdrop-blur">
@@ -494,6 +530,7 @@ function Inbox() {
             </div>
           )}
         </section>
+        </>)}
       </div>
 
       {draft && <Compose key={JSON.stringify([draft.mode, draft.subject])} from={email} initial={draft} onClose={() => setDraft(null)} onSend={send} />}

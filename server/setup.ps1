@@ -105,6 +105,20 @@ if ($key -and $key.Trim().Length -gt 0) {
   Ok "Skipped"
 }
 
+# 9. Optional: Google client secret for "Connect Gmail"
+Step "Connect Gmail with Google (optional)"
+Write-Host "    If you have a Google OAuth client secret (starts with GOCSPX-), paste it here and press Enter."
+Write-Host "    To skip, just press Enter."
+$secure = Read-Host "    Google client secret" -AsSecureString
+$gkey = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+if ($gkey -and $gkey.Trim().Length -gt 0) {
+  $gkey.Trim() | & npx.cmd wrangler secret put GOOGLE_CLIENT_SECRET
+  Check "Saving the Google secret"
+  Ok "Google secret saved."
+} else {
+  Ok "Skipped"
+}
+
 # Check it answers
 Step "Checking https://api.ranilix.com (can take a minute the first time)"
 $up = $false

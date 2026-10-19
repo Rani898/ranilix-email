@@ -82,3 +82,20 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- Fast "latest message" lookup for the inbox's frequent new-mail check.
 CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id, id);
+
+-- "Connect Google": one linked Gmail account per user. Tokens are encrypted by the Worker.
+CREATE TABLE IF NOT EXISTS google_accounts (
+  user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  google_email   TEXT NOT NULL DEFAULT '',
+  refresh_enc    TEXT NOT NULL,
+  access_enc     TEXT,
+  access_expires INTEGER NOT NULL DEFAULT 0,
+  connected_at   INTEGER NOT NULL
+);
+-- One-time codes that tie Google's redirect back to the user who started it.
+CREATE TABLE IF NOT EXISTS oauth_states (
+  state      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  return_to  TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

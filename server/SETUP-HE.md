@@ -70,6 +70,24 @@ npx.cmd wrangler deploy
 5. מריצים שוב את `setup.bat`, ובשלב האחרון מדביקים את המפתח.
 - מגבלות: 100 מיילים ביום לכל האתר (המסלול החינמי), וכל משתמש עד 20 ביום. אפשר לכבות/להדליק בפאנל הניהול ← הגדרות האתר.
 
+## חיבור Gmail עם Google (חינם, עד 100 משתמשים)
+כך משתמשים יכולים ללחוץ על **Gmail** בתיבת הדואר ולקרוא את ה-Gmail שלהם בתוך Ranilix (קריאה בלבד).
+1. נכנסים ל-https://console.cloud.google.com ויוצרים פרויקט חדש (למשל `Ranilix`).
+2. **APIs & Services ← Library** ← מחפשים **Gmail API** ← **Enable**.
+3. **Google Auth Platform** (או **OAuth consent screen**) ← **Get started**:
+   - App name: `Ranilix Email`, ‏User support email: המייל שלך.
+   - Audience: **External**.
+   - Contact: המייל שלך ← מסכימים ← **Create**.
+4. **Data Access ← Add or remove scopes** ← מוסיפים את `.../auth/gmail.readonly` (וגם `openid` ו-`email`) ← **Save**.
+5. **Audience ← Test users ← Add users** ← מוסיפים כל כתובת Gmail שמותר לה להתחבר (עד 100).
+6. **Clients ← Create client**:
+   - Application type: **Web application**
+   - Authorized redirect URIs: `https://api.ranilix.com/api/google/callback`
+   - **Create** ← מעתיקים את **Client ID** ואת **Client secret** (מתחיל ב-`GOCSPX-`).
+7. ב-`server\wrangler.toml` מדביקים את ה-Client ID בשורה `GOOGLE_CLIENT_ID = "..."`.
+8. מריצים `setup.bat`, ובשלב "Connect Gmail" מדביקים את ה-Client secret.
+- במצב הבדיקה (Testing): רק כתובות שהוספת בשלב 5 יכולות להתחבר, Google מציגה אזהרה "האפליקציה לא אומתה" (לוחצים Continue), וכל 7 ימים צריך להתחבר מחדש.
+
 ## פאנל הניהול
 - הכתובת: `https://rani898.github.io/ranilix-email/admin` (או הכפתור "פאנל ניהול" בתיבת הדואר, שמופיע רק לך).
 - מי יכול להיכנס נקבע בשרת, בשורה `ADMIN_USERS = "rani,rani4"` (כמה שמות מפרידים בפסיק) בקובץ `server\wrangler.toml`. כדי להיכנס, **הירשם באתר עם השם `rani`** (אם תבחר שם אחר, שנה את השורה הזאת ותריץ שוב `npx.cmd wrangler deploy`).

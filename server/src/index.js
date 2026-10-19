@@ -6,6 +6,7 @@
 
 import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
+import { googleRoute } from "./google.js";
 
 /* ------------------------------------------------------------------ */
 /* Config & helpers                                                    */
@@ -268,6 +269,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM messages WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM user_meta WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
@@ -496,8 +498,13 @@ async function route(req, env) {
     return json({ ok: true });
   }
 
+  // Google redirects the browser here after "Connect Google" (no Ranilix token on this request).
+  if (path === "/api/google/callback") return googleRoute(req, env, path, url, null, { HttpError, json, htmlToText, randomHex });
+
   // ---- Everything below needs a logged-in user ----
   const user = await requireUser(req, env);
+
+  if (path.startsWith("/api/google/")) return googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex });
 
   if (path === "/api/me" && req.method === "GET") return json({ email: user.email, isAdmin: isAdmin(env, user.username) });
 
@@ -725,5 +732,6 @@ export default {
     const now = Date.now();
     await env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now).run();
     await env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - DAY).run();
+    await env.DB.prepare("DELETE FROM oauth_states WHERE created_at < ?").bind(now - DAY).run();
   },
 };
