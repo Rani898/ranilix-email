@@ -101,6 +101,7 @@ function Inbox() {
   const [permission, setPermission] = useState(notificationsSupported ? Notification.permission : "unsupported");
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [usage, setUsage] = useState(null); // { used, max } addresses for this person
   const [params, setParams] = useSearchParams();
   const [banner, setBanner] = useState(null);
   const seenIds = useRef(null);
@@ -184,7 +185,7 @@ function Inbox() {
   // Admin link (only shown to admins; the server still checks every admin request) + site banner.
   useEffect(() => {
     if (!email) return;
-    getMe().then((me) => setIsAdmin(!!me.isAdmin)).catch(() => {});
+    getMe().then((me) => { setIsAdmin(!!me.isAdmin); if (me.accounts) setUsage(me.accounts); }).catch(() => {});
     getAnnouncement().then((a) => {
       let dismissed = "";
       try { dismissed = sessionStorage.getItem("ranilix.banner.dismissed") || ""; } catch { /* ignore */ }
@@ -311,7 +312,7 @@ function Inbox() {
           )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
-          <AccountMenu email={email} onLogout={logout} />
+          <AccountMenu email={email} onLogout={logout} usage={isAdmin ? null : usage} />
         </div>
       </header>
 

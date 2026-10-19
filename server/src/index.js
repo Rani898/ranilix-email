@@ -16,7 +16,9 @@ const RESERVED = new Set([
   "admin", "administrator", "support", "help", "info", "root", "postmaster", "hostmaster",
   "abuse", "noreply", "no-reply", "security", "ranilix", "team", "tips", "webmaster", "mail",
 ]);
-const USERNAME_MIN = 3;
+const USERNAME_MIN = 4;
+// Each person can own this many addresses unless an admin raises it (account_limits).
+const DEFAULT_ACCOUNTS = 5;
 const USERNAME_MAX = 30;
 const PASSWORD_MIN = 8;
 const PBKDF2_ITERATIONS = 100_000; // Workers' maximum for PBKDF2
@@ -54,6 +56,7 @@ async function hashPassword(password, saltHex) {
 export function validateUsername(u) {
   if (typeof u !== "string" || !u) return "Pick a name for your address.";
   if (u.length < USERNAME_MIN) return `Use at least ${USERNAME_MIN} characters.`;
+  if ((u.match(/[a-z0-9]/g) || []).length < USERNAME_MIN) return `Use at least ${USERNAME_MIN} letters or numbers.`;
   if (u.length > USERNAME_MAX) return `Use at most ${USERNAME_MAX} characters.`;
   if (!/^[a-z0-9._-]+$/.test(u)) return "Use only lowercase letters, numbers, dots, dashes and underscores.";
   if (!/^[a-z0-9]/.test(u) || !/[a-z0-9]$/.test(u)) return "Start and end with a letter or number.";
@@ -242,6 +245,31 @@ async function readSendRequest(req) {
 /* Admin helpers                                                       */
 /* ------------------------------------------------------------------ */
 
+/* ---- Address groups: one person can own up to N addresses ---- */
+
+const ownerOf = async (env, userId) =>
+  (await env.DB.prepare("SELECT owner_id FROM account_owners WHERE user_id = ?").bind(userId).first())?.owner_id ?? userId;
+
+/** How many addresses a person (owner) has, and how many they may have. */
+async function groupInfo(env, ownerId) {
+  const [own, linked, limit] = await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE id = ?").bind(ownerId).first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM account_owners WHERE owner_id = ? AND user_id != ?").bind(ownerId, ownerId).first(),
+    env.DB.prepare("SELECT max_accounts FROM account_limits WHERE owner_id = ?").bind(ownerId).first(),
+  ]);
+  return { used: own.n + linked.n, max: limit?.max_accounts ?? DEFAULT_ACCOUNTS };
+}
+
+/** The signed-in user behind any of the given session tokens (the browser sends its saved accounts). */
+async function firstValidUser(env, tokens) {
+  for (const tok of (Array.isArray(tokens) ? tokens : []).slice(0, 10)) {
+    if (typeof tok !== "string" || !tok) continue;
+    const row = await env.DB.prepare("SELECT user_id, expires_at FROM sessions WHERE token_hash = ?").bind(await sha256(tok)).first();
+    if (row && row.expires_at > Date.now()) return row.user_id;
+  }
+  return null;
+}
+
 const adminSet = (env) => new Set((env.ADMIN_USERS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
 const isAdmin = (env, username) => adminSet(env).has(String(username).toLowerCase());
 
@@ -270,6 +298,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM user_meta WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM account_owners WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
@@ -315,22 +344,37 @@ async function adminRoute(req, env, admin, path, url) {
     const { results } = await env.DB.prepare(`
       SELECT u.id, u.username, u.created_at,
              COALESCE(m.suspended, 0) AS suspended, m.last_login_at,
+             COALESCE((SELECT owner_id FROM account_owners WHERE user_id = u.id), u.id) AS owner_id,
              (SELECT COUNT(*) FROM messages WHERE user_id = u.id) AS messages,
              (SELECT COALESCE(SUM(size), 0) FROM attachments WHERE user_id = u.id) AS storage
       FROM users u LEFT JOIN user_meta m ON m.user_id = u.id
       WHERE u.username LIKE ?
       ORDER BY u.created_at DESC LIMIT 50 OFFSET ?`).bind(q, offset).all();
     const total = await env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE username LIKE ?").bind(q).first();
+    // Address counts per person, for the owners on this page (2 queries, not one per row).
+    const owners = [...new Set(results.map((u) => u.owner_id))];
+    const used = new Map(owners.map((o) => [o, 0]));
+    const limits = new Map();
+    if (owners.length) {
+      const marks = owners.map(() => "?").join(",");
+      const { results: cnt } = await env.DB.prepare(`
+        SELECT COALESCE(ao.owner_id, u.id) AS o, COUNT(*) AS n FROM users u LEFT JOIN account_owners ao ON ao.user_id = u.id
+        WHERE COALESCE(ao.owner_id, u.id) IN (${marks}) GROUP BY o`).bind(...owners).all();
+      for (const r of cnt) used.set(r.o, r.n);
+      const { results: lim } = await env.DB.prepare(`SELECT owner_id, max_accounts FROM account_limits WHERE owner_id IN (${marks})`).bind(...owners).all();
+      for (const r of lim) limits.set(r.owner_id, r.max_accounts);
+    }
     return json({
       total: total.n,
       users: results.map((u) => ({
         id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
+        accounts: { used: used.get(u.owner_id) || 1, max: limits.get(u.owner_id) ?? DEFAULT_ACCOUNTS },
       })),
     });
   }
 
-  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password))?$/);
+  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password|accounts))?$/);
   if (userMatch) {
     const id = Number(userMatch[1]);
     const target = await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(id).first();
@@ -344,6 +388,16 @@ async function adminRoute(req, env, admin, path, url) {
         .bind(id, suspended ? 1 : 0).run();
       if (suspended) await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id).run();
       return json({ ok: true });
+    }
+    // Set how many addresses this user's person/group may have.
+    if (userMatch[2] === "accounts" && req.method === "PUT") {
+      const { max } = await readJson(req);
+      const n = Math.floor(Number(max));
+      if (!Number.isFinite(n) || n < 1 || n > 100) throw new HttpError(400, "Choose a number from 1 to 100.", "accounts_range");
+      const owner = await ownerOf(env, id);
+      await env.DB.prepare("INSERT INTO account_limits (owner_id, max_accounts) VALUES (?, ?) ON CONFLICT(owner_id) DO UPDATE SET max_accounts = excluded.max_accounts")
+        .bind(owner, n).run();
+      return json({ ok: true, accounts: await groupInfo(env, owner) });
     }
     if (userMatch[2] === "password" && req.method === "POST") {
       const { password } = await readJson(req);
@@ -445,7 +499,7 @@ async function route(req, env) {
   }
 
   if (path === "/api/signup" && req.method === "POST") {
-    const { username, password, lang } = await readJson(req);
+    const { username, password, lang, accountTokens } = await readJson(req);
     const u = String(username || "").toLowerCase();
     const uErr = validateUsername(u);
     if (uErr) throw new HttpError(400, uErr);
@@ -454,6 +508,15 @@ async function route(req, env) {
     if (pErr) throw new HttpError(400, pErr);
     if (!(await getSettings(env)).signupsOpen) throw new HttpError(403, "New sign-ups are paused right now.", "signups_closed");
     await rateLimit(env, `signup:${ip}`, 5, 3600 * 1000);
+
+    // Creating another address from a browser that's already signed in: it joins that person's group.
+    const existing = await firstValidUser(env, accountTokens);
+    const ownerId = existing ? await ownerOf(env, existing) : null;
+    const creator = existing && await env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(existing).first();
+    if (ownerId && !(creator && isAdmin(env, creator.username))) { // admins aren't limited
+      const { used, max } = await groupInfo(env, ownerId);
+      if (used >= max) throw new HttpError(403, `You can have up to ${max} addresses.`, "account_limit", { max });
+    }
 
     const salt = randomHex(16);
     const hash = await hashPassword(password, salt);
@@ -465,6 +528,7 @@ async function route(req, env) {
     } catch {
       throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
     }
+    if (ownerId) await env.DB.prepare("INSERT OR REPLACE INTO account_owners (user_id, owner_id) VALUES (?, ?)").bind(userId, ownerId).run();
     const email = `${u}@${env.MAIL_DOMAIN}`;
     const welcome = (WELCOME[lang] || WELCOME.en)(email);
     await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
@@ -506,7 +570,10 @@ async function route(req, env) {
 
   if (path.startsWith("/api/google/")) return googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex });
 
-  if (path === "/api/me" && req.method === "GET") return json({ email: user.email, isAdmin: isAdmin(env, user.username) });
+  if (path === "/api/me" && req.method === "GET") {
+    const accounts = await groupInfo(env, await ownerOf(env, user.id));
+    return json({ email: user.email, isAdmin: isAdmin(env, user.username), accounts });
+  }
 
   // Cheap "anything new?" check the inbox calls every few seconds (reads a single row).
   if (path === "/api/check" && req.method === "GET") {

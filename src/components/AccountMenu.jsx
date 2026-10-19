@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, LogOut, UserPlus } from "lucide-react";
+import { Check, LogOut, MailPlus, UserPlus } from "lucide-react";
 import SenderAvatar from "./SenderAvatar.jsx";
 import { getAccounts, switchAccount } from "../lib/session.js";
 import { useI18n } from "../lib/i18n.jsx";
 
 /** Avatar button in the inbox top bar: shows saved accounts, switch between them, add one, sign out. */
-export default function AccountMenu({ email, onLogout }) {
+export default function AccountMenu({ email, onLogout, usage }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -50,6 +50,7 @@ export default function AccountMenu({ email, onLogout }) {
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-slate-500">{t("accounts.current")}</p>
               <p dir="ltr" className="truncate text-sm font-semibold text-slate-900 rtl:text-right">{email}</p>
+              {usage && <p className="mt-0.5 text-xs text-slate-500">{t("accounts.usage", { used: usage.used, max: usage.max })}</p>}
             </div>
             <Check className="h-4 w-4 shrink-0 text-brand-600" aria-hidden="true" />
           </div>
@@ -67,6 +68,12 @@ export default function AccountMenu({ email, onLogout }) {
           )}
 
           <div className="mt-2 space-y-0.5 border-t border-slate-100 pt-2">
+            {(!usage || usage.used < usage.max) && (
+              <Link to="/signup" role="menuitem" className={item} onClick={() => setOpen(false)}>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><MailPlus className="h-4 w-4" /></span>
+                {t("accounts.create")}
+              </Link>
+            )}
             <Link to="/login?add=1" role="menuitem" className={item} onClick={() => setOpen(false)}>
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><UserPlus className="h-4 w-4" /></span>
               {t("accounts.add")}

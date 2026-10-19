@@ -3,7 +3,7 @@
 // Without it (demo mode), they use a fake in-browser backend so the site still works.
 
 import { API_URL, BRAND, DEMO_MODE } from "../config.js";
-import { getSession } from "./session.js";
+import { getAccounts, getSession } from "./session.js";
 import { loadMailbox, saveMailbox } from "./mailbox.js";
 import { formatBytes } from "./validation.js";
 
@@ -64,6 +64,7 @@ const demo = {
   async checkUsernameAvailable(u) { await delay(300); return !RESERVED.has(u); },
   async signUp({ username }) {
     await delay(700);
+    if (getAccounts().length >= 5) throw new ApiError("limit", "account_limit", { max: 5 });
     if (RESERVED.has(username)) throw new ApiError("taken", "name_taken");
     return { email: `${username}@${BRAND.domain}`, token: null };
   },
@@ -113,7 +114,11 @@ const live = {
     const { available } = await request(`/api/username-available?u=${encodeURIComponent(u)}`);
     return available;
   },
-  signUp: ({ username, password }) => request("/api/signup", { method: "POST", body: { username, password, lang: document.documentElement.lang || "en" } }),
+  // accountTokens: addresses already signed in on this browser, so the new one joins the same person (max 5 by default).
+  signUp: ({ username, password }) => request("/api/signup", {
+    method: "POST",
+    body: { username, password, lang: document.documentElement.lang || "en", accountTokens: getAccounts().map((a) => a.token).filter(Boolean) },
+  }),
   logIn: ({ email, password, remember }) => request("/api/login", { method: "POST", body: { email, password, remember } }),
   async logOut() { try { await request("/api/logout", { method: "POST", auth: true }); } catch { /* ignore */ } },
   async listMessages() { return (await request("/api/messages", { auth: true })).messages; },
@@ -139,7 +144,7 @@ const live = {
 // Account info + site announcement
 demo.getMe = async () => {
   const email = demoEmail();
-  return { email, isAdmin: email?.split("@")[0] === "rani" };
+  return { email, isAdmin: email?.split("@")[0] === "rani", accounts: { used: getAccounts().length, max: 5 } };
 };
 demo.getAnnouncement = async () => {
   try {

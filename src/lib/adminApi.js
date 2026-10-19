@@ -14,6 +14,7 @@ const live = {
   users: (q = "", offset = 0) => request(`/api/admin/users?q=${encodeURIComponent(q)}&offset=${offset}`, { auth: true }),
   setSuspended: (id, suspended) => request(`/api/admin/users/${id}/suspend`, { method: "POST", body: { suspended }, auth: true }),
   resetPassword: (id, password) => request(`/api/admin/users/${id}/password`, { method: "POST", body: { password }, auth: true }),
+  setAccountLimit: (id, max) => request(`/api/admin/users/${id}/accounts`, { method: "PUT", body: { max }, auth: true }),
   deleteUser: (id, confirm) => request(`/api/admin/users/${id}`, { method: "DELETE", body: { confirm }, auth: true }),
   broadcasts: () => request("/api/admin/broadcasts", { auth: true }),
   sendBroadcast: (subject, body, test) => request("/api/admin/broadcasts", { method: "POST", body: { subject, body, test }, auth: true }),
@@ -40,8 +41,9 @@ function seed() {
     storageBytes: ((i * 389) % 2400) * 1024,
     suspended: n === "omer",
     admin: false,
+    accounts: { used: 1 + (i % 3), max: 5 },
   }));
-  users.push({ id: "1", email: me, createdAt: now - 20 * DAY, lastLoginAt: now, messages: 9, storageBytes: 0, suspended: false, admin: true });
+  users.push({ id: "1", email: me, createdAt: now - 20 * DAY, lastLoginAt: now, messages: 9, storageBytes: 0, suspended: false, admin: true, accounts: { used: 1, max: 5 } });
   return {
     users,
     broadcasts: [{ id: "b1", subject: "Dark mode is here 🌙", body: "Hi!\n\nRanilix now has dark mode.", createdAt: now - 3 * DAY, sentBy: "rani", recipients: 12, read: 8 }],
@@ -90,6 +92,16 @@ const demo = {
     save(s);
   },
   async resetPassword() { await delay(300); },
+  async setAccountLimit(id, max) {
+    await delay(250);
+    const n = Math.floor(Number(max));
+    if (!(n >= 1 && n <= 100)) throw new ApiError("", "accounts_range");
+    const s = load();
+    const u = s.users.find((x) => x.id === id);
+    if (u) u.accounts = { used: u.accounts?.used || 1, max: n };
+    save(s);
+    return { ok: true, accounts: u?.accounts };
+  },
   async deleteUser(id, confirm) {
     const s = load();
     const u = s.users.find((x) => x.id === id);

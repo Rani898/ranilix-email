@@ -99,3 +99,16 @@ CREATE TABLE IF NOT EXISTS oauth_states (
   return_to  TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- Addresses created from a signed-in browser belong to the same person (owner).
+-- A user with no row here is their own owner.
+CREATE TABLE IF NOT EXISTS account_owners (
+  user_id  INTEGER PRIMARY KEY,
+  owner_id INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_account_owners_owner ON account_owners(owner_id);
+-- Per-person address limit set by an admin (default is 5 in the Worker).
+CREATE TABLE IF NOT EXISTS account_limits (
+  owner_id     INTEGER PRIMARY KEY,
+  max_accounts INTEGER NOT NULL
+);

@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Loader2,
   Mail,
+  Mails,
   Megaphone,
   Menu,
   Search,
@@ -297,6 +298,37 @@ function ResetModal({ user, onClose, onDone }) {
   );
 }
 
+function AccountsModal({ user, onClose, onDone }) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  const used = user.accounts?.used ?? 1;
+  const [max, setMax] = useState(String(user.accounts?.max ?? 5));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const n = Number(max);
+  const valid = Number.isInteger(n) && n >= 1 && n <= 100;
+  const run = async () => {
+    setBusy(true);
+    try { await adminApi.setAccountLimit(user.id, n); onDone(); } catch (e) { setError(errorText(e)); setBusy(false); }
+  };
+  return (
+    <Modal title={t("admin.users.accountsTitle", { email: user.email })} onClose={onClose}
+      footer={<><Button variant="ghost" onClick={onClose}>{t("admin.users.cancel")}</Button><Button onClick={run} disabled={busy || !valid}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("admin.users.accountsSave")}</Button></>}>
+      <p>{t("admin.users.accountsText")}</p>
+      <p className="mt-3 font-semibold text-slate-800">{t("admin.users.accountsUsed", { used, max: user.accounts?.max ?? 5 })}</p>
+      <label htmlFor="accounts-max" className="mt-4 block text-sm font-semibold text-slate-800">{t("admin.users.accountsLabel")}</label>
+      <div className="mt-1.5 flex items-center gap-2">
+        <button type="button" onClick={() => setMax(String(Math.max(1, (Number(max) || 1) - 1)))} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-300 text-lg font-bold text-slate-700 hover:bg-slate-100" aria-label="-1">−</button>
+        <input id="accounts-max" type="number" min="1" max="100" inputMode="numeric" dir="ltr" value={max} onChange={(e) => setMax(e.target.value)}
+          className="w-24 rounded-xl border border-slate-300 bg-surface px-3 py-2.5 text-center text-lg font-bold tabular-nums text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
+        <button type="button" onClick={() => setMax(String(Math.min(100, (Number(max) || 0) + 1)))} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-300 text-lg font-bold text-slate-700 hover:bg-slate-100" aria-label="+1">+</button>
+      </div>
+      {!valid && <p className="mt-2 text-rose-600">{t("errors.accounts_range")}</p>}
+      {error && <p role="alert" className="mt-3 text-rose-600">{error}</p>}
+    </Modal>
+  );
+}
+
 function DeleteModal({ user, onClose, onDone }) {
   const { t } = useI18n();
   const errorText = useErrorText();
@@ -359,18 +391,18 @@ function UsersTab({ toast }) {
       {!data ? <Spinner /> : (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[860px] text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  {["user", "joined", "lastLogin", "messages", "storage", "status"].map((k) => (
-                    <th key={k} scope="col" className={`px-4 py-3 font-semibold ${["messages", "storage"].includes(k) ? "text-end" : "text-start"}`}>{t(`admin.users.${k}`)}</th>
+                  {["user", "joined", "lastLogin", "messages", "storage", "addresses", "status"].map((k) => (
+                    <th key={k} scope="col" className={`px-4 py-3 font-semibold ${["messages", "storage", "addresses"].includes(k) ? "text-end" : "text-start"}`}>{t(`admin.users.${k}`)}</th>
                   ))}
                   <th scope="col" className="px-4 py-3 text-end font-semibold"><span className="sr-only">{t("admin.users.actions")}</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {data.users.length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-500">{t("admin.users.empty")}</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-500">{t("admin.users.empty")}</td></tr>
                 )}
                 {data.users.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50">
@@ -384,12 +416,18 @@ function UsersTab({ toast }) {
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">{u.lastLoginAt ? f.relative(u.lastLoginAt) : <span className="text-slate-400">{t("admin.users.never")}</span>}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">{f.num(u.messages)}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700"><bdi dir="ltr">{formatBytes(u.storageBytes)}</bdi></td>
+                    <td className="px-4 py-3 text-end tabular-nums text-slate-700">
+                      <button type="button" onClick={() => setDialog({ kind: "accounts", user: u })} className="rounded-lg px-2 py-1 font-semibold hover:bg-slate-100" title={t("admin.users.accountsAction")}>
+                        <bdi dir="ltr">{u.admin ? "∞" : u.accounts ? `${u.accounts.used}/${u.accounts.max}` : "–"}</bdi>
+                      </button>
+                    </td>
                     <td className="px-4 py-3"><StatusPill user={u} /></td>
                     <td className="px-4 py-2">
                       <div className="flex justify-end gap-0.5">
                         {!u.admin && (u.suspended
                           ? <IconAction label={t("admin.users.restore")} icon={UserCheck} onClick={() => restore(u)} />
                           : <IconAction label={t("admin.users.suspend")} icon={UserX} onClick={() => setDialog({ kind: "suspend", user: u })} />)}
+                        <IconAction label={t("admin.users.accountsAction")} icon={Mails} onClick={() => setDialog({ kind: "accounts", user: u })} />
                         <IconAction label={t("admin.users.resetPassword")} icon={KeyRound} onClick={() => setDialog({ kind: "reset", user: u })} />
                         {!u.admin && <IconAction danger label={t("admin.users.delete")} icon={Trash2} onClick={() => setDialog({ kind: "delete", user: u })} />}
                       </div>
@@ -409,6 +447,7 @@ function UsersTab({ toast }) {
 
       {dialog?.kind === "suspend" && <SuspendModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.suspendedToast", dialog.user)} />}
       {dialog?.kind === "reset" && <ResetModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.resetDone", dialog.user)} />}
+      {dialog?.kind === "accounts" && <AccountsModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.accountsDone", dialog.user)} />}
       {dialog?.kind === "delete" && <DeleteModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.deletedToast", dialog.user)} />}
     </div>
   );
