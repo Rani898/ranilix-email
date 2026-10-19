@@ -116,6 +116,7 @@ export default {
     login: "I already have an account",
   },
   footer: {
+    privacyPolicy: "Privacy policy",
     blurb: "Free, private email for everyone. No credit card, no trial, no catch. Just an inbox that's yours.",
     product: "Product",
     privacy: "Privacy & security",
@@ -179,6 +180,43 @@ export default {
     attachments: "Attachments ({n})",
     attachmentsHint: "Open the message in Gmail to download them.",
     replyFromRanilix: "Reply from Ranilix",
+  },
+  privacy: {
+    title: "Privacy Policy",
+    updated: "Last updated: October 19, 2026",
+    intro: "Ranilix Email Free (\"Ranilix\", \"we\") is a free email service at ranilix.com. This page explains what we collect, why, and the choices you have. We don't sell your data and we don't show ads.",
+    sections: [
+      { h: "What we store", p: [
+        "Your account: your username, your @ranilix.com address and a scrambled (hashed) version of your password. We never store your password itself.",
+        "Your mail: messages you send and receive at your Ranilix address, and their attachments, so you can read them in your inbox.",
+        "Basic security records: sign-in sessions and short-lived counters that stop spam and password-guessing.",
+      ] },
+      { h: "Connecting a Google account (Gmail)", p: [
+        "Connecting Gmail is optional. If you choose to connect, you sign in on Google's own page and approve read-only access (the gmail.readonly permission) plus your Google email address.",
+        "We use this access only to show your Gmail messages to you inside Ranilix, when you open the Gmail folder. Messages are fetched from Google when you look at them and are not saved on our servers.",
+        "We store the Google sign-in tokens, encrypted, and the Google email address you connected, so the connection keeps working. We can't send, change or delete anything in your Gmail.",
+        "We never sell Google user data, never use it for ads, and never let people read it, except when you ask us for help or the law requires it.",
+        "Ranilix's use and transfer to any other app of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements.",
+        "You can disconnect at any time from the Gmail folder (\"Disconnect Google\"). This deletes the stored tokens and tells Google to cancel the access. You can also remove access at myaccount.google.com/permissions.",
+      ] },
+      { h: "Services we use", p: [
+        "Cloudflare hosts our server and stores accounts and mail. Resend delivers mail you send to other providers (like Gmail). GitHub Pages hosts the website.",
+        "To show company logos next to messages, the website asks Google's public icon service for the sender's domain (for example discord.com). Only the domain is shared, never the message.",
+      ] },
+      { h: "Cookies and browser storage", p: [
+        "We don't use tracking cookies. The website keeps your sign-in, language and theme in your browser's storage so you stay signed in and your settings are remembered.",
+      ] },
+      { h: "Deleting your data", p: [
+        "Messages you delete from the Trash are removed for good. To delete your whole account and all its mail, write to us and we'll do it.",
+      ] },
+      { h: "Children", p: [
+        "Ranilix is not meant for children under 13, and we don't knowingly create accounts for them.",
+      ] },
+      { h: "Changes and contact", p: [
+        "If this policy changes, we'll update the date at the top of this page. Questions? Write to {email}.",
+      ] },
+    ],
+    back: "Back to home",
   },
   accounts: {
     menu: "Account menu",

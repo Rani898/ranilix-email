@@ -5,6 +5,7 @@ import SignUp from "./pages/SignUp.jsx";
 import Login from "./pages/Login.jsx";
 import Inbox from "./pages/Inbox.jsx";
 import Admin from "./pages/Admin.jsx";
+import Privacy from "./pages/Privacy.jsx";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
 
 function ScrollToTop() {
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="*" element={<Landing />} />
       </Routes>
     </>

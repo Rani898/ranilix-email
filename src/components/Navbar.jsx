@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import Logo from "./Logo.jsx";
 import Preferences from "./Preferences.jsx";
@@ -8,6 +8,9 @@ import { useI18n } from "../lib/i18n.jsx";
 
 export default function Navbar() {
   const { t } = useI18n();
+  // Section links (#features…) live on the home page; from other pages they go there first.
+  const onHome = useLocation().pathname === "/";
+  const sec = (h) => (onHome ? h : `${import.meta.env.BASE_URL}${h}`);
   const [open, setOpen] = useState(false);
   const signedIn = !!getSession();
   const links = [
@@ -25,7 +28,7 @@ export default function Navbar() {
         <ul className="hidden items-center gap-7 lg:flex">
           {links.map((l) => (
             <li key={l.href}>
-              <a href={l.href} className="text-sm font-medium text-slate-600 transition hover:text-slate-900">
+              <a href={sec(l.href)} className="text-sm font-medium text-slate-600 transition hover:text-slate-900">
                 {l.label}
               </a>
             </li>
@@ -64,7 +67,7 @@ export default function Navbar() {
           <ul className="flex flex-col">
             {links.map((l) => (
               <li key={l.href}>
-                <a href={l.href} onClick={() => setOpen(false)} className="block rounded-lg px-3 py-3 text-base font-medium text-slate-700 hover:bg-slate-50">
+                <a href={sec(l.href)} onClick={() => setOpen(false)} className="block rounded-lg px-3 py-3 text-base font-medium text-slate-700 hover:bg-slate-50">
                   {l.label}
                 </a>
               </li>
