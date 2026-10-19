@@ -156,6 +156,15 @@ export default {
     yourAddress: "Your new address",
     openInbox: "Open my inbox",
   },
+  accounts: {
+    menu: "Account menu",
+    current: "Signed in as",
+    switchTo: "Switch account",
+    add: "Add another account",
+    addTitle: "Add another account",
+    addSubtitle: "Sign in with another Ranilix address. You can switch between your accounts from the inbox.",
+    back: "Back to my inbox",
+  },
   login: {
     title: "Welcome back",
     subtitle: "Log in to your free inbox.",

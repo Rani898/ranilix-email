@@ -680,11 +680,11 @@ export default function Admin() {
       {menuOpen && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMenuOpen(false)} />}
       <aside className={`fixed inset-y-0 start-0 z-40 flex w-64 flex-col bg-ink p-5 text-white transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0 ${menuOpen ? "translate-x-0" : "max-lg:ltr:-translate-x-full max-lg:rtl:translate-x-full"}`}>
         <div className="flex items-center justify-between">
-          <div dir="ltr" className="flex items-center gap-2.5">
+          <Link to="/" dir="ltr" className="flex items-center gap-2.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40" title={t("nav.home", { name: BRAND.name })}>
             <LogoMark size={34} />
             <span className="font-display text-lg font-extrabold tracking-[-0.03em]">{BRAND.short}</span>
             <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#3b2800]">{t("admin.badge")}</span>
-          </div>
+          </Link>
           <button type="button" onClick={() => setMenuOpen(false)} className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 lg:hidden" aria-label={t("compose.close")}><X className="h-5 w-5" /></button>
         </div>
         {nav}

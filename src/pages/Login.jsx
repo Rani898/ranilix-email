@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, LogIn } from "lucide-react";
 import AuthLayout from "../components/AuthLayout.jsx";
 import FormField from "../components/FormField.jsx";
@@ -24,6 +24,9 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  // "?add=1": signing in to one more account while another is already open.
+  const [params] = useSearchParams();
+  const adding = params.has("add") && !!getSession();
 
   const onSubmit = async (e) => {
     e.preventDefault();
@@ -43,13 +46,16 @@ export default function Login() {
     }
   };
 
-  if (getSession()) return <Navigate to="/inbox" replace />;
+  if (getSession() && !adding) return <Navigate to="/inbox" replace />;
 
   return (
     <AuthLayout
-      title={t("login.title")}
-      subtitle={t("login.subtitle")}
-      footer={<>{t("login.newHere")} <Link to="/signup" className="font-semibold text-brand-600 hover:text-brand-700">{t("login.create")}</Link></>}
+      title={adding ? t("accounts.addTitle") : t("login.title")}
+      subtitle={adding ? t("accounts.addSubtitle") : t("login.subtitle")}
+      footer={<>
+        {t("login.newHere")} <Link to="/signup" className="font-semibold text-brand-600 hover:text-brand-700">{t("login.create")}</Link>
+        {adding && <span className="mt-3 block"><Link to="/inbox" className="font-semibold text-slate-600 hover:text-slate-900">{t("accounts.back")}</Link></span>}
+      </>}
     >
       <form onSubmit={onSubmit} noValidate className="space-y-5">
         <FormField

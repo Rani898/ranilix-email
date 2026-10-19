@@ -8,7 +8,6 @@ import {
   Forward,
   Inbox as InboxIcon,
   Loader2,
-  LogOut,
   Mail,
   Menu,
   Paperclip,
@@ -24,12 +23,14 @@ import {
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
+import SenderAvatar from "../components/SenderAvatar.jsx";
+import AccountMenu from "../components/AccountMenu.jsx";
 import Preferences from "../components/Preferences.jsx";
 import Compose from "../components/Compose.jsx";
 import { AttachmentList } from "../components/Attachments.jsx";
 import { AnnouncementBanner } from "../components/ui.jsx";
 import LinkifiedText from "../components/LinkifiedText.jsx";
-import { endSession, getSession } from "../lib/session.js";
+import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
 
@@ -37,17 +38,8 @@ import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, ge
 const CHECK_VISIBLE_MS = 5_000;
 const CHECK_HIDDEN_MS = 60_000;
 const FOLDER_ICONS = { inbox: InboxIcon, starred: Star, sent: Send, trash: Trash2 };
-const AVATAR_COLORS = ["bg-brand-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-violet-500", "bg-sky-500"];
-const colorFor = (s) => AVATAR_COLORS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
 const notificationsSupported = typeof window !== "undefined" && "Notification" in window;
 
-function Avatar({ name, size = "h-10 w-10 text-sm" }) {
-  return (
-    <span className={`grid shrink-0 place-items-center rounded-full font-bold text-white ${size} ${colorFor(name)}`} aria-hidden="true">
-      {name.trim()[0]?.toUpperCase() || "?"}
-    </span>
-  );
-}
 
 /* ---------- Reply / forward helpers ---------- */
 
@@ -80,7 +72,15 @@ function buildDraft(kind, m, me, t, longDate) {
 
 /* ---------- Page ---------- */
 
-export default function Inbox() {
+/** Remounts the inbox whenever the user switches to another saved account. */
+export default function InboxPage() {
+  useSessionVersion();
+  const email = getSession()?.email;
+  if (!email) return <Navigate to="/login" replace />;
+  return <Inbox key={email} />;
+}
+
+function Inbox() {
   const { t, locale } = useI18n();
   const errorText = useErrorText();
   const session = getSession();
@@ -113,9 +113,9 @@ export default function Inbox() {
   const longDate = useCallback((ts) => new Date(ts).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }), [locale]);
 
   const handleError = useCallback((err) => {
-    if (err instanceof AuthError) { endSession(); navigate("/login", { replace: true }); return; }
+    if (err instanceof AuthError) { endSession(email); if (!getSession()) navigate("/login", { replace: true }); return; }
     setToast(errorText(err));
-  }, [navigate, errorText]);
+  }, [navigate, errorText, email]);
 
   // Tell the user about mail that arrived since the last check.
   const announce = useCallback((list) => {
@@ -218,8 +218,6 @@ export default function Inbox() {
       .sort((a, b) => b.date - a.date);
   }, [messages, folder, query]);
 
-  if (!email) return <Navigate to="/login" replace />;
-
   const open = messages.find((m) => m.id === openId);
 
   // Optimistic update: change the screen right away, then save on the server.
@@ -259,7 +257,12 @@ export default function Inbox() {
     try { setPermission(await Notification.requestPermission()); } catch { /* ignore */ }
   };
 
-  const logout = async () => { await logOut(); endSession(); navigate("/"); };
+  // Signs out only this account; if other accounts are saved, the inbox switches to the next one.
+  const logout = async () => {
+    await logOut();
+    endSession(email);
+    if (!getSession()) navigate("/");
+  };
 
   const folderLabel = t(`inbox.folders.${folder}`);
 
@@ -270,9 +273,11 @@ export default function Inbox() {
         <button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label={t("inbox.openFolders")}>
           <Menu className="h-5 w-5" />
         </button>
-        <div dir="ltr" className="flex items-center gap-2 lg:w-56 rtl:lg:justify-end">
-          <LogoMark size={36} />
-          <span className="hidden font-display text-xl font-extrabold tracking-[-0.03em] text-slate-900 sm:block">{BRAND.short}</span>
+        <div className="flex lg:w-56">
+          <Link to="/" dir="ltr" className="flex items-center gap-2 rounded-xl focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" aria-label={t("nav.home", { name: BRAND.name })} title={t("nav.home", { name: BRAND.name })}>
+            <LogoMark size={36} />
+            <span className="hidden font-display text-xl font-extrabold tracking-[-0.03em] text-slate-900 sm:block">{BRAND.short}</span>
+          </Link>
         </div>
         <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-100 px-3 focus-within:bg-surface focus-within:ring-2 focus-within:ring-brand-200">
           <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
@@ -294,10 +299,7 @@ export default function Inbox() {
           )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
-          <Avatar name={email} size="h-9 w-9 text-sm" />
-          <button onClick={logout} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label={t("inbox.logout")} title={t("inbox.logout")}>
-            <LogOut className="h-5 w-5 rtl:rotate-180" />
-          </button>
+          <AccountMenu email={email} onLogout={logout} />
         </div>
       </header>
 
@@ -403,7 +405,9 @@ export default function Inbox() {
                         openId === m.id ? "bg-brand-50" : !m.read ? "bg-brand-50/40" : ""
                       }`}
                     >
-                      <Avatar name={m.folder === "sent" ? m.to : m.from.name || m.from.email} />
+                      {m.folder === "sent"
+                        ? <SenderAvatar name={m.to} email={m.to.split(/[,;\s]+/)[0]} />
+                        : <SenderAvatar name={m.from.name || m.from.email} email={m.from.email} />}
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline justify-between gap-2">
                           <span dir="auto" className={`truncate text-sm ${m.read ? "font-medium text-slate-700" : "font-bold text-slate-900"}`}>{who}</span>
@@ -451,7 +455,7 @@ export default function Inbox() {
               </div>
               <h2 dir="auto" className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{open.subject}</h2>
               <div className="mt-5 flex items-center gap-3">
-                <Avatar name={open.from.name || open.from.email} size="h-11 w-11 text-base" />
+                <SenderAvatar name={open.from.name || open.from.email} email={open.from.email} size={44} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-900">
                     <bdi>{open.from.name}</bdi> <bdi dir="ltr" className="font-normal text-slate-500">&lt;{open.from.email}&gt;</bdi>
