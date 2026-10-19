@@ -519,13 +519,27 @@ function BroadcastTab({ toast }) {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-5">
           <p className="text-sm font-semibold text-slate-700">{t("admin.broadcast.templates")}</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {t("admin.broadcast.tpl").map((tpl) => (
-              <button key={tpl.label} type="button" onClick={() => { setSubject(tpl.subject); setBody(tpl.body); }} className="rounded-full border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700">
-                {tpl.label}
-              </button>
+          <div className="mt-2 space-y-3">
+            {t("admin.broadcast.tplGroups").map((group) => (
+              <div key={group.name}>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{group.name}</p>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {group.items.map((tpl) => (
+                    <button
+                      key={tpl.label}
+                      type="button"
+                      onClick={() => { setSubject(tpl.subject); setBody(tpl.body); setError(""); }}
+                      aria-pressed={subject === tpl.subject}
+                      className={`rounded-full border px-3 py-1.5 text-sm font-medium transition ${subject === tpl.subject ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-300 text-slate-700 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700"}`}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
+          <p className="mt-2 text-xs text-slate-500">{t("admin.broadcast.tplHint")}</p>
           <label htmlFor="bc-subject" className="mt-5 block text-sm font-semibold text-slate-800">{t("admin.broadcast.subject")}</label>
           <input id="bc-subject" dir="auto" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={t("admin.broadcast.subjectPlaceholder")} maxLength={300} className="mt-1.5 w-full rounded-xl border border-slate-300 bg-surface px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
           <label htmlFor="bc-body" className="mt-4 block text-sm font-semibold text-slate-800">{t("admin.broadcast.body")}</label>

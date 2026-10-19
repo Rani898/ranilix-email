@@ -447,10 +447,103 @@ export default {
       title: "Send an update",
       subtitle: "Your message lands in every user's inbox, from Ranilix Team.",
       templates: "Start from a template",
-      tpl: [
-        { label: "New feature", subject: "Something new in Ranilix ✨", body: "Hi!\n\nWe just added [FEATURE] to Ranilix.\n\n[WHAT IT DOES AND HOW TO USE IT]\n\nAs always, Ranilix stays free.\n\nThe Ranilix Team" },
-        { label: "Maintenance", subject: "Scheduled maintenance", body: "Hi,\n\nRanilix will be briefly unavailable on [DATE] between [TIME] and [TIME] while we upgrade our servers.\n\nYour messages are safe and nothing is lost. Mail sent during that time will arrive afterwards.\n\nThanks for your patience,\nThe Ranilix Team" },
-        { label: "Tip", subject: "Tip: get more out of your inbox", body: "Hi!\n\nDid you know you can [TIP]?\n\nThe Ranilix Team" },
+      tplHint: "Words in [brackets] are for you to fill in before sending.",
+      tplGroups: [
+        {
+          "name": "Announcements",
+          "items": [
+            {
+              "label": "New feature",
+              "subject": "Something new in Ranilix ✨",
+              "body": "Hi!\n\nWe just added [FEATURE] to Ranilix.\n\n[WHAT IT DOES AND HOW TO USE IT]\n\nAs always, Ranilix stays free.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Maintenance",
+              "subject": "Scheduled maintenance",
+              "body": "Hi,\n\nRanilix will be briefly unavailable on [DATE] between [TIME] and [TIME] while we upgrade our servers.\n\nYour messages are safe and nothing is lost. Mail sent during that time will arrive afterwards.\n\nThanks for your patience,\nThe Ranilix Team"
+            },
+            {
+              "label": "Maintenance done",
+              "subject": "We're back ✅",
+              "body": "Hi,\n\nThe maintenance is finished and Ranilix is fully working again.\n\nThanks for waiting! If something still looks wrong, just reply to this message.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Problem fixed",
+              "subject": "The problem is fixed",
+              "body": "Hi,\n\nEarlier today some of you had trouble with [WHAT HAPPENED]. It's fixed now and everything works as usual.\n\nSorry for the trouble, and thanks for your patience.\n\nThe Ranilix Team"
+            }
+          ]
+        },
+        {
+          "name": "Guides",
+          "items": [
+            {
+              "label": "Connect Gmail",
+              "subject": "Read your Gmail inside Ranilix",
+              "body": "Hi!\n\nYou can now see your Gmail messages right inside Ranilix:\n\n1. In your inbox, click \"Gmail\" in the menu on the side.\n2. Click \"Connect with Google\" and choose your Google account.\n3. Google will say the app isn't verified yet. Click \"Advanced\", then \"Go to ranilix.com\".\n4. Tick the Gmail box and click Continue.\n\nThat's it! The connection is read-only: we can't send or delete anything in your Gmail, and you can disconnect at any time.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Up to 5 addresses",
+              "subject": "You can have up to 5 addresses",
+              "body": "Hi!\n\nDid you know every person can have up to 5 free Ranilix addresses? For example one for friends, one for work and one for games.\n\nTo create another one:\n1. Click your round picture at the top of the inbox.\n2. Choose \"Create a new address\".\n\nTo switch between your addresses, click your picture again and pick the one you want.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Verification codes",
+              "subject": "Use Ranilix for sign-up codes",
+              "body": "Hi!\n\nYour Ranilix address works on any site: Discord, Google, games, online shops and more.\n\nWhen a site sends you a code, it shows up in your inbox within seconds. Links in the email (like \"Verify\") can be clicked right from the message.\n\nTip: keep the inbox open in a tab so you see new mail right away.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Notifications",
+              "subject": "Never miss an email 🔔",
+              "body": "Hi!\n\nRanilix can tell you the moment a new email arrives:\n\n1. In your inbox, click \"Turn on notifications\" in the side menu.\n2. Click \"Allow\" when the browser asks.\n\nNotifications work while Ranilix is open in a browser tab (it can stay in the background).\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Dark mode & language",
+              "subject": "Make Ranilix yours 🌙",
+              "body": "Hi!\n\nYou can change how Ranilix looks at any time, using the buttons at the top of the page:\n\n• The moon/sun button switches between dark and light.\n• The language button switches between English and Hebrew.\n\nYour choice is remembered next time you open the site.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Attachments",
+              "subject": "Sending photos and files 📎",
+              "body": "Hi!\n\nTo send a photo or a document:\n\n1. Click \"Compose\".\n2. Click the paperclip button, or just drag files into the message.\n3. Write your message and click Send.\n\nYou can attach up to 10 files, each up to 10 MB (20 MB in total per message).\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Reply & forward",
+              "subject": "Reply, reply all and forward",
+              "body": "Hi!\n\nAt the bottom of every message you'll find three buttons:\n\n• Reply: answer just the sender.\n• Reply all: answer everyone who got the message.\n• Forward: send the message (with its files) to someone else.\n\nThe original message is quoted for you automatically.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Search",
+              "subject": "Find any email in seconds 🔍",
+              "body": "Hi!\n\nUse the search box at the top of your inbox to find any email. It looks in the subject, the text, the sender and even file names.\n\nTip: star important emails (the ☆ next to each message) and find them later in the \"Starred\" folder.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Stay safe",
+              "subject": "3 ways to keep your account safe 🔒",
+              "body": "Hi!\n\nA few quick tips to keep your Ranilix account safe:\n\n1. Use a strong password that you don't use anywhere else.\n2. Never share a verification code with anyone. Ranilix will never ask you for your password or for codes.\n3. Be careful with emails that ask you to \"log in urgently\" or pay money. When in doubt, don't click.\n\nThe Ranilix Team"
+            }
+          ]
+        },
+        {
+          "name": "Other",
+          "items": [
+            {
+              "label": "Thank you",
+              "subject": "Thank you for using Ranilix 💙",
+              "body": "Hi!\n\nWe just wanted to say thank you for being part of Ranilix.\n\nIf you enjoy it, tell a friend: anyone can open a free address in about a minute.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Feedback",
+              "subject": "What should we build next?",
+              "body": "Hi!\n\nWe're always improving Ranilix and we'd love to hear from you.\n\nWhat do you like? What's missing? Just reply to this email and tell us. We read every message.\n\nThe Ranilix Team"
+            },
+            {
+              "label": "Holiday greeting",
+              "subject": "Happy holidays from Ranilix 🎉",
+              "body": "Hi!\n\nThe whole Ranilix team wishes you and your family a happy [HOLIDAY]!\n\nThe Ranilix Team"
+            }
+          ]
+        }
       ],
       subject: "Subject",
       subjectPlaceholder: "What's new?",
