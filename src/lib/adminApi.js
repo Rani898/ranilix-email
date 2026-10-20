@@ -17,6 +17,9 @@ const live = {
   setAccountLimit: (id, max) => request(`/api/admin/users/${id}/accounts`, { method: "PUT", body: { max }, auth: true }),
   deleteUser: (id, confirm) => request(`/api/admin/users/${id}`, { method: "DELETE", body: { confirm }, auth: true }),
   broadcasts: () => request("/api/admin/broadcasts", { auth: true }),
+  reports: (status = "open") => request(`/api/admin/reports?status=${status}`, { auth: true }),
+  setReportStatus: (id, status) => request(`/api/admin/reports/${id}`, { method: "PUT", body: { status }, auth: true }),
+  deleteReport: (id) => request(`/api/admin/reports/${id}`, { method: "DELETE", auth: true }),
   sendBroadcast: (subject, body, test) => request("/api/admin/broadcasts", { method: "POST", body: { subject, body, test }, auth: true }),
   settings: () => request("/api/admin/settings", { auth: true }),
   saveSettings: (patch) => request("/api/admin/settings", { method: "PUT", body: patch, auth: true }),
@@ -50,6 +53,19 @@ function seed() {
     settings: { signupsOpen: true, outboundEnabled: true, outboundConfigured: false, announcement: { enabled: false, text: "", level: "info" } },
   };
 }
+function demoReports() {
+  const s = load();
+  if (!s.reports) {
+    const now = Date.now();
+    s.reports = [
+      { id: "r1", email: `noa@${BRAND.domain}`, category: "bug", message: "I didn't get the code from Discord. I waited 10 minutes.", page: "/inbox", userAgent: "Chrome on Android", createdAt: now - 2 * 3600 * 1000, status: "open" },
+      { id: "r2", email: `avi@${BRAND.domain}`, category: "idea", message: "It would be great to have folders for school and work.", page: "/inbox", userAgent: "Safari on iPhone", createdAt: now - 26 * 3600 * 1000, status: "open" },
+      { id: "r3", email: `maya@${BRAND.domain}`, category: "spam", message: "I keep getting ads from the same address.", page: "/inbox", userAgent: "Edge on Windows", createdAt: now - 4 * DAY, status: "resolved" },
+    ];
+    save(s);
+  }
+  return s.reports;
+}
 function load() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s?.users) return s; } catch { /* ignore */ }
   const s = seed(); save(s); return s;
@@ -77,6 +93,7 @@ const demo = {
       broadcasts: s.broadcasts.length,
       signups: sample.map((count, i) => ({ day: from + i * DAY, count })),
       signupsOpen: s.settings.signupsOpen,
+      openReports: demoReports().filter((r) => r.status === "open").length,
     };
   },
   async users(q = "") {
@@ -111,6 +128,14 @@ const demo = {
     save(s);
   },
   async broadcasts() { await delay(150); return { broadcasts: load().broadcasts }; },
+  async reports(status = "open") {
+    await delay(150);
+    const all = demoReports();
+    const list = status === "all" ? all : all.filter((r) => r.status === status);
+    return { open: all.filter((r) => r.status === "open").length, resolved: all.filter((r) => r.status === "resolved").length, reports: list };
+  },
+  async setReportStatus(id, status) { const s = load(); s.reports = demoReports().map((r) => (r.id === id ? { ...r, status } : r)); save(s); },
+  async deleteReport(id) { const s = load(); s.reports = demoReports().filter((r) => r.id !== id); save(s); },
   async sendBroadcast(subject, body, test) {
     await delay(500);
     if (!subject.trim() || !body.trim()) throw new ApiError("", "broadcast_empty");

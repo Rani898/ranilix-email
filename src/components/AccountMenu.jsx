@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, LogOut, MailPlus, UserPlus } from "lucide-react";
+import { Check, Flag, LogOut, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
 import SenderAvatar from "./SenderAvatar.jsx";
+import ReportDialog from "./ReportDialog.jsx";
+import InstallDialog from "./InstallDialog.jsx";
+import { useInstall } from "../lib/pwa.js";
 import { getAccounts, switchAccount } from "../lib/session.js";
 import { useI18n } from "../lib/i18n.jsx";
 
 /** Avatar button in the inbox top bar: shows saved accounts, switch between them, add one, sign out. */
-export default function AccountMenu({ email, onLogout, usage }) {
+export default function AccountMenu({ email, onLogout, usage, displayName }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [dialog, setDialog] = useState(null); // "report" | "install"
+  const app = useInstall();
+  const installApp = async () => { setOpen(false); if (app.canPrompt) await app.install(); else setDialog("install"); };
   const ref = useRef(null);
   const accounts = getAccounts();
   const others = accounts.filter((a) => a.email !== email);
@@ -44,12 +50,13 @@ export default function AccountMenu({ email, onLogout, usage }) {
       </button>
 
       {open && (
-        <div role="menu" className="absolute end-0 top-12 z-50 w-72 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-slate-200 bg-surface p-2 shadow-2xl">
+        <div role="menu" className="absolute end-0 top-12 z-50 max-h-[calc(100dvh-5rem)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-surface p-2 shadow-2xl">
           <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3">
             <SenderAvatar name={email} email={email} size={40} />
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-slate-500">{t("accounts.current")}</p>
-              <p dir="ltr" className="truncate text-sm font-semibold text-slate-900 rtl:text-right">{email}</p>
+              {displayName && <p dir="auto" className="truncate text-sm font-bold text-slate-900">{displayName}</p>}
+              <p dir="ltr" className={`truncate text-sm rtl:text-right ${displayName ? "text-slate-600" : "font-semibold text-slate-900"}`}>{email}</p>
               {usage && <p className="mt-0.5 text-xs text-slate-500">{t("accounts.usage", { used: usage.used, max: usage.max })}</p>}
             </div>
             <Check className="h-4 w-4 shrink-0 text-brand-600" aria-hidden="true" />
@@ -78,6 +85,22 @@ export default function AccountMenu({ email, onLogout, usage }) {
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><UserPlus className="h-4 w-4" /></span>
               {t("accounts.add")}
             </Link>
+          </div>
+          <div className="mt-2 space-y-0.5 border-t border-slate-100 pt-2">
+            <Link to="/settings" role="menuitem" className={item} onClick={() => setOpen(false)}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Settings className="h-4 w-4" /></span>
+              {t("settings.title")}
+            </Link>
+            {!app.installed && (
+              <button type="button" role="menuitem" className={item} onClick={installApp}>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Smartphone className="h-4 w-4" /></span>
+                {t("install.menu")}
+              </button>
+            )}
+            <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); setDialog("report"); }}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Flag className="h-4 w-4" /></span>
+              {t("report.menu")}
+            </button>
             <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); onLogout(); }}>
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><LogOut className="h-4 w-4 rtl:rotate-180" /></span>
               <span className="min-w-0">
@@ -88,6 +111,8 @@ export default function AccountMenu({ email, onLogout, usage }) {
           </div>
         </div>
       )}
+      {dialog === "report" && <ReportDialog onClose={() => setDialog(null)} />}
+      {dialog === "install" && <InstallDialog ios={app.ios} onClose={() => setDialog(null)} />}
     </div>
   );
 }

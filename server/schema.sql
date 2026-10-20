@@ -112,3 +112,32 @@ CREATE TABLE IF NOT EXISTS account_limits (
   owner_id     INTEGER PRIMARY KEY,
   max_accounts INTEGER NOT NULL
 );
+
+-- Account settings: display name, email signature and profile photo (small data URL).
+CREATE TABLE IF NOT EXISTS profiles (
+  user_id      INTEGER PRIMARY KEY,
+  display_name TEXT NOT NULL DEFAULT '',
+  signature    TEXT NOT NULL DEFAULT '',
+  avatar       TEXT,
+  updated_at   INTEGER NOT NULL DEFAULT 0
+);
+-- "Report a problem" messages from users, shown in the admin panel.
+CREATE TABLE IF NOT EXISTS reports (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER,
+  email      TEXT NOT NULL,
+  category   TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  page       TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'open'
+);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status, created_at);
+-- Devices that turned on push notifications (one row per device + account).
+CREATE TABLE IF NOT EXISTS push_subs (
+  endpoint   TEXT NOT NULL,
+  user_id    INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (endpoint, user_id)
+);

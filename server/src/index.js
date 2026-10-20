@@ -7,6 +7,7 @@
 import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
+import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 
 /* ------------------------------------------------------------------ */
 /* Config & helpers                                                    */
@@ -270,6 +271,22 @@ async function firstValidUser(env, tokens) {
   return null;
 }
 
+/* ---- Profiles (display name, signature, photo) ---- */
+
+const MAX_AVATAR_CHARS = 200_000; // a 256px JPEG data URL is ~20–40 KB
+const cleanName = (s) => String(s || "").replace(/[<>"\r\n\t]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
+async function getProfile(env, userId) {
+  const row = await env.DB.prepare("SELECT display_name, signature, avatar IS NOT NULL AS has_avatar, updated_at FROM profiles WHERE user_id = ?").bind(userId).first();
+  return { displayName: row?.display_name || "", signature: row?.signature || "", hasAvatar: !!row?.has_avatar, updatedAt: row?.updated_at || 0 };
+}
+async function upsertProfile(env, userId, fields) {
+  const cur = await env.DB.prepare("SELECT * FROM profiles WHERE user_id = ?").bind(userId).first();
+  const next = { display_name: cur?.display_name ?? "", signature: cur?.signature ?? "", avatar: cur?.avatar ?? null, ...fields };
+  await env.DB.prepare("INSERT OR REPLACE INTO profiles (user_id, display_name, signature, avatar, updated_at) VALUES (?, ?, ?, ?, ?)")
+    .bind(userId, next.display_name, next.signature, next.avatar, Date.now()).run();
+}
+const REPORT_CATEGORIES = new Set(["bug", "idea", "spam", "account", "other"]);
+
 const adminSet = (env) => new Set((env.ADMIN_USERS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
 const isAdmin = (env, username) => adminSet(env).has(String(username).toLowerCase());
 
@@ -299,6 +316,8 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM user_meta WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM account_owners WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM profiles WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM push_subs WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
@@ -334,6 +353,7 @@ async function adminRoute(req, env, admin, path, url) {
       broadcasts: bcasts.n, signups, signupsOpen: settings.signupsOpen,
       outboundToday: (await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE key = 'out:global'").first().then((r) => (r && now - r.window_start < DAY ? r.count : 0))),
       outboundLimit: OUTBOUND_GLOBAL_DAY,
+      openReports: (await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").first()).n,
     });
   }
 
@@ -415,6 +435,30 @@ async function adminRoute(req, env, admin, path, url) {
       await deleteUserCompletely(env, id);
       return json({ ok: true });
     }
+  }
+
+  // Reports from users
+  if (path === "/api/admin/reports" && req.method === "GET") {
+    const status = url.searchParams.get("status") || "open";
+    const where = status === "all" ? "" : "WHERE status = ?";
+    const stmt = env.DB.prepare(`SELECT * FROM reports ${where} ORDER BY created_at DESC LIMIT 200`);
+    const { results } = await (status === "all" ? stmt : stmt.bind(status === "resolved" ? "resolved" : "open")).all();
+    const counts = await env.DB.prepare("SELECT status, COUNT(*) AS n FROM reports GROUP BY status").all();
+    const by = Object.fromEntries(counts.results.map((r) => [r.status, r.n]));
+    return json({
+      open: by.open || 0, resolved: by.resolved || 0,
+      reports: results.map((r) => ({ id: String(r.id), email: r.email, category: r.category, message: r.message, page: r.page, userAgent: r.user_agent, createdAt: r.created_at, status: r.status })),
+    });
+  }
+  const repMatch = path.match(/^\/api\/admin\/reports\/(\d+)$/);
+  if (repMatch && req.method === "PUT") {
+    const { status } = await readJson(req);
+    await env.DB.prepare("UPDATE reports SET status = ? WHERE id = ?").bind(status === "resolved" ? "resolved" : "open", Number(repMatch[1])).run();
+    return json({ ok: true });
+  }
+  if (repMatch && req.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM reports WHERE id = ?").bind(Number(repMatch[1])).run();
+    return json({ ok: true });
   }
 
   // Broadcasts: GET history, POST send (test → only to the admin)
@@ -562,6 +606,18 @@ async function route(req, env) {
     return json({ ok: true });
   }
 
+  // Profile photos are public (like other mail apps), so the inbox can show them next to messages.
+  const avatarMatch = path.match(/^\/api\/avatar\/([a-z0-9._-]{1,40})$/);
+  if (avatarMatch && req.method === "GET") {
+    const row = await env.DB.prepare("SELECT p.avatar FROM profiles p JOIN users u ON u.id = p.user_id WHERE u.username = ?").bind(avatarMatch[1]).first();
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(row?.avatar || "");
+    if (!m) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
+    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    return new Response(bytes, { headers: { "Content-Type": m[1], "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff" } });
+  }
+
+  if (path === "/api/push/key" && req.method === "GET") return json({ publicKey: await vapidPublicKey(env) });
+
   // Google redirects the browser here after "Connect Google" (no Ranilix token on this request).
   if (path === "/api/google/callback") return googleRoute(req, env, path, url, null, { HttpError, json, htmlToText, randomHex });
 
@@ -572,13 +628,87 @@ async function route(req, env) {
 
   if (path === "/api/me" && req.method === "GET") {
     const accounts = await groupInfo(env, await ownerOf(env, user.id));
-    return json({ email: user.email, isAdmin: isAdmin(env, user.username), accounts });
+    return json({ email: user.email, isAdmin: isAdmin(env, user.username), accounts, profile: await getProfile(env, user.id) });
   }
 
   // Cheap "anything new?" check the inbox calls every few seconds (reads a single row).
   if (path === "/api/check" && req.method === "GET") {
     const row = await env.DB.prepare("SELECT id FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT 1").bind(user.id).first();
     return json({ latest: row ? String(row.id) : null });
+  }
+
+  /* ---- Account settings ---- */
+  if (path === "/api/profile" && req.method === "GET") return json(await getProfile(env, user.id));
+  if (path === "/api/profile" && req.method === "PUT") {
+    const { displayName, signature } = await readJson(req);
+    const fields = {};
+    if (displayName !== undefined) fields.display_name = cleanName(displayName);
+    if (signature !== undefined) fields.signature = String(signature || "").slice(0, 1000);
+    await upsertProfile(env, user.id, fields);
+    return json(await getProfile(env, user.id));
+  }
+  if (path === "/api/profile/avatar" && req.method === "PUT") {
+    const { dataUrl } = await readJson(req);
+    if (typeof dataUrl !== "string" || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new HttpError(400, "Choose a JPG, PNG or WebP picture.", "avatar_type");
+    if (dataUrl.length > MAX_AVATAR_CHARS) throw new HttpError(400, "That picture is too big.", "avatar_big");
+    await upsertProfile(env, user.id, { avatar: dataUrl });
+    return json(await getProfile(env, user.id));
+  }
+  if (path === "/api/profile/avatar" && req.method === "DELETE") {
+    await upsertProfile(env, user.id, { avatar: null });
+    return json(await getProfile(env, user.id));
+  }
+  if (path === "/api/account/password" && req.method === "POST") {
+    const { current, next } = await readJson(req);
+    await rateLimit(env, `pw:${user.id}`, 10, 3600 * 1000);
+    const row = await env.DB.prepare("SELECT password_hash, salt FROM users WHERE id = ?").bind(user.id).first();
+    if (typeof current !== "string" || !safeEqual(await hashPassword(current, row.salt), row.password_hash)) {
+      throw new HttpError(400, "Your current password isn't right.", "wrong_password");
+    }
+    const pErr = validatePassword(next);
+    if (pErr) throw new HttpError(400, pErr, "weak_password");
+    const salt = randomHex(16);
+    await env.DB.prepare("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?").bind(await hashPassword(next, salt), salt, user.id).run();
+    // Sign out every other device; keep this one.
+    const mine = await sha256((req.headers.get("Authorization") || "").slice(7));
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, mine).run();
+    return json({ ok: true });
+  }
+  if (path === "/api/account/delete" && req.method === "POST") {
+    const { password } = await readJson(req);
+    await rateLimit(env, `del:${user.id}`, 10, 3600 * 1000);
+    if (isAdmin(env, user.username)) throw new HttpError(400, "Admins can't delete their account here.", "admin_protected");
+    const row = await env.DB.prepare("SELECT password_hash, salt FROM users WHERE id = ?").bind(user.id).first();
+    if (typeof password !== "string" || !safeEqual(await hashPassword(password, row.salt), row.password_hash)) {
+      throw new HttpError(400, "Your password isn't right.", "wrong_password");
+    }
+    await deleteUserCompletely(env, user.id);
+    return json({ ok: true });
+  }
+
+  /* ---- Report a problem ---- */
+  if (path === "/api/reports" && req.method === "POST") {
+    const { category, message, page } = await readJson(req);
+    const text = String(message || "").trim();
+    if (text.length < 5) throw new HttpError(400, "Tell us a bit more (at least a few words).", "report_short");
+    await rateLimit(env, `report:${user.id}`, 5, 3600 * 1000);
+    await env.DB.prepare("INSERT INTO reports (user_id, email, category, message, page, user_agent, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')")
+      .bind(user.id, user.email, REPORT_CATEGORIES.has(category) ? category : "other", text.slice(0, 3000), String(page || "").slice(0, 200),
+        (req.headers.get("User-Agent") || "").slice(0, 300), Date.now()).run();
+    return json({ ok: true }, 201);
+  }
+
+  /* ---- Push notifications ---- */
+  if (path === "/api/push/subscribe" && req.method === "POST") {
+    const { endpoint } = await readJson(req);
+    if (!validPushEndpoint(endpoint)) throw new HttpError(400, "Invalid request.");
+    await env.DB.prepare("INSERT OR IGNORE INTO push_subs (endpoint, user_id, created_at) VALUES (?, ?, ?)").bind(endpoint, user.id, Date.now()).run();
+    return json({ ok: true });
+  }
+  if (path === "/api/push/unsubscribe" && req.method === "POST") {
+    const { endpoint } = await readJson(req);
+    await env.DB.prepare("DELETE FROM push_subs WHERE endpoint = ? AND user_id = ?").bind(String(endpoint || ""), user.id).run();
+    return json({ ok: true });
   }
 
   if (path.startsWith("/api/admin/")) {
@@ -640,6 +770,7 @@ async function route(req, env) {
 
   if (path === "/api/send" && req.method === "POST") {
     const { to, subject, body, forward, files } = await readSendRequest(req);
+    const senderName = (await getProfile(env, user.id)).displayName || user.username;
     const recipients = [...new Set(String(to || "").toLowerCase().split(/[,;\s]+/).filter(Boolean))];
     if (!recipients.length) throw new HttpError(400, "Add at least one recipient.");
     if (recipients.length > 10) throw new HttpError(400, "You can send to up to 10 people at once.", "too_many_recipients");
@@ -700,7 +831,7 @@ async function route(req, env) {
         method: "POST",
         headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: `${user.username} <${user.email}>`,
+          from: `"${senderName.replace(/["\\]/g, "")}" <${user.email}>`,
           to: external,
           subject: String(subject || "").trim() || "(no subject)",
           text: String(body || ""),
@@ -718,12 +849,13 @@ async function route(req, env) {
     }
 
     const now = Date.now();
-    const msg = { fromName: user.username, fromAddr: user.email, to: recipients.join(", "), subject: String(subject || "").trim() || "(no subject)", body: String(body || ""), date: now };
+    const msg = { fromName: senderName, fromAddr: user.email, to: recipients.join(", "), subject: String(subject || "").trim() || "(no subject)", body: String(body || ""), date: now };
     const sentId = await insertMessage(env, user.id, { ...msg, folder: "sent", read: true });
     await linkAttachments(env, user.id, sentId, stored);
     for (const id of ids) {
       const inboxId = await insertMessage(env, id, { ...msg, folder: "inbox", read: false });
       await linkAttachments(env, id, inboxId, stored);
+      await notifyUser(env, id);
     }
     return json({ ok: true }, 201);
   }
@@ -792,6 +924,7 @@ export default {
       date: parsed.date ? Date.parse(parsed.date) || Date.now() : Date.now(),
     });
     await linkAttachments(env, user.id, messageId, kept);
+    await notifyUser(env, user.id);
   },
 
   // Daily cleanup of expired sessions and old rate-limit rows

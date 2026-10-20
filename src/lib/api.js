@@ -144,7 +144,7 @@ const live = {
 // Account info + site announcement
 demo.getMe = async () => {
   const email = demoEmail();
-  return { email, isAdmin: email?.split("@")[0] === "rani", accounts: { used: getAccounts().length, max: 5 } };
+  return { email, isAdmin: email?.split("@")[0] === "rani", accounts: { used: getAccounts().length, max: 5 }, profile: await demo.getProfile() };
 };
 demo.getAnnouncement = async () => {
   try {
@@ -174,6 +174,36 @@ demo.googleDisconnect = async () => ({ ok: true });
 demo.gmailList = async () => ({ messages: [], nextPageToken: null });
 demo.gmailGet = async () => { throw new ApiError("", "google_not_connected"); };
 
+// Account settings, reports and push notifications
+live.getProfile = () => request("/api/profile", { auth: true });
+live.updateProfile = (patch) => request("/api/profile", { method: "PUT", body: patch, auth: true });
+live.setAvatar = (dataUrl) => request("/api/profile/avatar", { method: "PUT", body: { dataUrl }, auth: true });
+live.removeAvatar = () => request("/api/profile/avatar", { method: "DELETE", auth: true });
+live.changePassword = (current, next) => request("/api/account/password", { method: "POST", body: { current, next }, auth: true });
+live.deleteAccount = (password) => request("/api/account/delete", { method: "POST", body: { password }, auth: true });
+live.sendReport = (report) => request("/api/reports", { method: "POST", body: report, auth: true });
+live.pushKey = async () => (await request("/api/push/key")).publicKey;
+live.pushSubscribe = (endpoint) => request("/api/push/subscribe", { method: "POST", body: { endpoint }, auth: true });
+live.pushUnsubscribe = (endpoint) => request("/api/push/unsubscribe", { method: "POST", body: { endpoint }, auth: true });
+
+// Demo: settings live in this browser.
+const DEMO_PROFILE = (email) => `ranilix.demo.profile.${email}`;
+const demoProfile = () => {
+  try { return { displayName: "", signature: "", avatar: null, ...JSON.parse(localStorage.getItem(DEMO_PROFILE(demoEmail())) || "{}") }; } catch { return { displayName: "", signature: "", avatar: null }; }
+};
+const saveDemoProfile = (p) => { try { localStorage.setItem(DEMO_PROFILE(demoEmail()), JSON.stringify(p)); } catch { /* ignore */ } };
+const publicProfile = (p) => ({ displayName: p.displayName, signature: p.signature, hasAvatar: !!p.avatar, updatedAt: p.updatedAt || 0, avatar: p.avatar || null });
+demo.getProfile = async () => publicProfile(demoProfile());
+demo.updateProfile = async (patch) => { const p = { ...demoProfile(), ...patch, updatedAt: Date.now() }; saveDemoProfile(p); return publicProfile(p); };
+demo.setAvatar = async (dataUrl) => { const p = { ...demoProfile(), avatar: dataUrl, updatedAt: Date.now() }; saveDemoProfile(p); return publicProfile(p); };
+demo.removeAvatar = async () => { const p = { ...demoProfile(), avatar: null, updatedAt: Date.now() }; saveDemoProfile(p); return publicProfile(p); };
+demo.changePassword = async (current, next) => { await delay(400); if (!current) throw new ApiError("", "wrong_password"); if (!next || next.length < 8) throw new ApiError("", "weak_password"); return { ok: true }; };
+demo.deleteAccount = async (password) => { await delay(400); if (!password) throw new ApiError("", "wrong_password"); try { localStorage.removeItem(DEMO_PROFILE(demoEmail())); } catch { /* ignore */ } return { ok: true }; };
+demo.sendReport = async ({ message }) => { await delay(400); if (String(message || "").trim().length < 5) throw new ApiError("", "report_short"); return { ok: true }; };
+demo.pushKey = async () => null;
+demo.pushSubscribe = async () => ({ ok: true });
+demo.pushUnsubscribe = async () => ({ ok: true });
+
 const api = DEMO_MODE ? demo : live;
 
 export const {
@@ -181,4 +211,6 @@ export const {
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
   getMe, getAnnouncement, checkLatest,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
+  getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
+  pushKey, pushSubscribe, pushUnsubscribe,
 } = api;

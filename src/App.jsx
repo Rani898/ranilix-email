@@ -6,6 +6,9 @@ import Login from "./pages/Login.jsx";
 import Inbox from "./pages/Inbox.jsx";
 import Admin from "./pages/Admin.jsx";
 import Privacy from "./pages/Privacy.jsx";
+import Settings from "./pages/Settings.jsx";
+import { useI18n } from "./lib/i18n.jsx";
+import { shareLang } from "./lib/pwa.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
 
 function ScrollToTop() {
@@ -16,6 +19,8 @@ function ScrollToTop() {
 
 export default function App() {
   const [onboarding, setOnboarding] = useState(needsOnboarding);
+  const { lang } = useI18n();
+  useEffect(() => { shareLang(lang); }, [lang]);
   return (
     <>
       <ScrollToTop />
@@ -27,6 +32,7 @@ export default function App() {
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/privacy" element={<Privacy />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Landing />} />
       </Routes>
     </>

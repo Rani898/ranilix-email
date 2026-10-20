@@ -5,6 +5,8 @@ import {
   Check,
   Copy,
   Eye,
+  Flag,
+  RotateCcw,
   HardDrive,
   KeyRound,
   LayoutDashboard,
@@ -40,6 +42,7 @@ const TABS = [
   { id: "overview", icon: LayoutDashboard },
   { id: "users", icon: Users },
   { id: "broadcast", icon: Megaphone },
+  { id: "reports", icon: Flag },
   { id: "settings", icon: Settings },
 ];
 
@@ -207,6 +210,7 @@ function Overview({ go }) {
           </p>
           <div className="mt-4 grid gap-2">
             <Button onClick={() => go("broadcast")}><Megaphone className="h-4 w-4" /> {t("admin.overview.quickBroadcast")}</Button>
+            <Button variant="ghost" onClick={() => go("reports")}><Flag className="h-4 w-4" /> {t("admin.reports.quick", { n: f.num(stats.openReports || 0) })}</Button>
             <Button variant="ghost" onClick={() => go("settings")}><Settings className="h-4 w-4" /> {t("admin.overview.quickSettings")}</Button>
           </div>
           <h3 className="mt-6 text-sm font-semibold text-slate-700">{t("admin.overview.recent")}</h3>
@@ -453,6 +457,92 @@ function UsersTab({ toast }) {
   );
 }
 
+/* ---------- Reports ---------- */
+
+const REPORT_TONE = {
+  bug: "bg-rose-50 text-rose-700",
+  idea: "bg-violet-50 text-violet-700",
+  spam: "bg-amber-50 text-amber-800",
+  account: "bg-sky-50 text-sky-700",
+  other: "bg-slate-100 text-slate-700",
+};
+
+/** "Mozilla/5.0 (iPhone…) … Safari" → "Safari · iPhone" */
+function deviceName(ua = "") {
+  const os = /iPhone|iPad/.test(ua) ? (ua.match(/iPhone|iPad/)[0]) : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+  const browser = /Edg\//.test(ua) ? "Edge" : /SamsungBrowser/.test(ua) ? "Samsung Internet" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+  return [browser, os].filter(Boolean).join(" · ") || ua.slice(0, 40);
+}
+
+function ReportsTab({ toast, onCount }) {
+  const { t } = useI18n();
+  const f = useFormatters();
+  const errorText = useErrorText();
+  const [status, setStatus] = useState("open");
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async (s) => {
+    try {
+      const res = await adminApi.reports(s);
+      setData(res);
+      onCount(res.open);
+      setError("");
+    } catch (e) { setError(errorText(e)); }
+  }, [errorText, onCount]);
+
+  useEffect(() => { setData(null); load(status); }, [status, load]);
+
+  const act = async (fn, msg) => {
+    try { await fn(); toast(t(msg)); load(status); } catch (e) { toast(errorText(e)); }
+  };
+
+  const filters = [["open", data?.open], ["resolved", data?.resolved], ["all", data ? data.open + data.resolved : undefined]];
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title={t("admin.reports.title")} subtitle={t("admin.reports.subtitle")}>
+        <div className="flex flex-wrap gap-2" role="tablist">
+          {filters.map(([id, n]) => (
+            <button key={id} type="button" role="tab" aria-selected={status === id} onClick={() => setStatus(id)}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${status === id ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-300 text-slate-600 hover:bg-slate-100"}`}>
+              {t(`admin.reports.filters.${id}`)}{n !== undefined && <span className="ms-1.5 tabular-nums opacity-70">{f.num(n)}</span>}
+            </button>
+          ))}
+        </div>
+      </PageHeader>
+      {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
+      {!data ? <Spinner /> : data.reports.length === 0 ? (
+        <Card className="px-6 py-14 text-center">
+          <Flag className="mx-auto h-9 w-9 text-slate-300" />
+          <p className="mt-3 font-semibold text-slate-700">{t(status === "open" ? "admin.reports.emptyOpen" : "admin.reports.empty")}</p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {data.reports.map((r) => (
+            <Card key={r.id} className={`p-5 ${r.status === "resolved" ? "opacity-75" : ""}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${REPORT_TONE[r.category] || REPORT_TONE.other}`}>{t(`report.categories.${r.category}`)}</span>
+                {r.status === "resolved" && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><Check className="h-3.5 w-3.5" /> {t("admin.reports.resolved")}</span>}
+                <span dir="ltr" className="text-sm font-semibold text-slate-800">{r.email}</span>
+                <span className="text-sm text-slate-500">· {f.relative(r.createdAt)}</span>
+              </div>
+              <p dir="auto" className="mt-3 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]">{r.message}</p>
+              <p className="mt-2 text-xs text-slate-400"><bdi dir="ltr">{r.page || "/"}</bdi>{r.userAgent && <> · <bdi dir="ltr">{deviceName(r.userAgent)}</bdi></>}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {r.status === "open"
+                  ? <Button onClick={() => act(() => adminApi.setReportStatus(r.id, "resolved"), "admin.reports.resolvedToast")}><Check className="h-4 w-4" /> {t("admin.reports.resolve")}</Button>
+                  : <Button variant="ghost" onClick={() => act(() => adminApi.setReportStatus(r.id, "open"), "admin.reports.reopenedToast")}><RotateCcw className="h-4 w-4" /> {t("admin.reports.reopen")}</Button>}
+                <Button variant="ghost" onClick={() => act(() => adminApi.deleteReport(r.id), "admin.reports.deletedToast")}><Trash2 className="h-4 w-4" /> {t("admin.reports.delete")}</Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Broadcast ---------- */
 
 function InboxPreview({ subject, body }) {
@@ -691,10 +781,14 @@ export default function Admin() {
   const [tab, setTab] = useState(() => (TABS.some((x) => `#${x.id}` === window.location.hash) ? window.location.hash.slice(1) : "overview"));
   const [menuOpen, setMenuOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
+  const [openReports, setOpenReports] = useState(0);
 
   useEffect(() => {
     if (!session) return;
-    getMe().then((me) => setAllowed(!!me.isAdmin)).catch(() => setAllowed(false));
+    getMe().then((me) => {
+      setAllowed(!!me.isAdmin);
+      if (me.isAdmin) adminApi.reports("open").then((r) => setOpenReports(r.open)).catch(() => {});
+    }).catch(() => setAllowed(false));
   }, [session?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -721,7 +815,8 @@ export default function Admin() {
       {TABS.map(({ id, icon: Icon }) => (
         <button key={id} type="button" onClick={() => go(id)} aria-current={tab === id ? "page" : undefined}
           className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${tab === id ? "bg-white/12 text-white" : "text-white/65 hover:bg-white/6 hover:text-white"}`}>
-          <Icon className="h-5 w-5" aria-hidden="true" /> {t(`admin.nav.${id}`)}
+          <Icon className="h-5 w-5" aria-hidden="true" /> <span className="flex-1 text-start">{t(`admin.nav.${id}`)}</span>
+          {id === "reports" && openReports > 0 && <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-[#3b2800]">{openReports}</span>}
         </button>
       ))}
     </nav>
@@ -766,6 +861,7 @@ export default function Admin() {
           {tab === "users" && <UsersTab toast={toast} />}
           {tab === "broadcast" && <BroadcastTab toast={toast} />}
           {tab === "settings" && <SettingsTab toast={toast} />}
+          {tab === "reports" && <ReportsTab toast={toast} onCount={setOpenReports} />}
         </main>
       </div>
 

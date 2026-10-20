@@ -5,6 +5,9 @@ import App from "./App.jsx";
 import { I18nProvider } from "./lib/i18n.jsx";
 import { ThemeProvider } from "./lib/theme.jsx";
 import "./index.css";
+import { setupPwa } from "./lib/pwa.js";
+
+setupPwa();
 
 // Single-file builds (e.g. a hosted preview page) can't use real URLs, so they use an in-memory router.
 const Router = import.meta.env.VITE_MEMORY_ROUTER ? MemoryRouter : BrowserRouter;

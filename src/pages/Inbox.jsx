@@ -33,6 +33,7 @@ import { AnnouncementBanner } from "../components/ui.jsx";
 import LinkifiedText from "../components/LinkifiedText.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
+import { enablePush, syncPush, unlinkPush } from "../lib/pwa.js";
 import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
 
 // New-mail check: every few seconds while the tab is visible, once a minute in the background.
@@ -71,6 +72,13 @@ function buildDraft(kind, m, me, t, longDate) {
   return { mode: "reply", to: to.join(", "), subject: prefixed("Re", m.subject), body: quoted };
 }
 
+/** Put the user's signature at the end of what they'll write (above any quoted message). */
+function withSignature(draft, signature) {
+  const sig = (signature || "").trim();
+  if (!sig || draft.signed) return draft;
+  return { ...draft, signed: true, body: `\n\n-- \n${sig}${draft.body || ""}` };
+}
+
 /* ---------- Page ---------- */
 
 /** Remounts the inbox whenever the user switches to another saved account. */
@@ -102,6 +110,7 @@ function Inbox() {
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [usage, setUsage] = useState(null); // { used, max } addresses for this person
+  const [profile, setProfile] = useState(null); // { displayName, signature }
   const [params, setParams] = useSearchParams();
   const [banner, setBanner] = useState(null);
   const seenIds = useRef(null);
@@ -185,7 +194,8 @@ function Inbox() {
   // Admin link (only shown to admins; the server still checks every admin request) + site banner.
   useEffect(() => {
     if (!email) return;
-    getMe().then((me) => { setIsAdmin(!!me.isAdmin); if (me.accounts) setUsage(me.accounts); }).catch(() => {});
+    getMe().then((me) => { setIsAdmin(!!me.isAdmin); if (me.accounts) setUsage(me.accounts); if (me.profile) setProfile(me.profile); }).catch(() => {});
+    syncPush();
     getAnnouncement().then((a) => {
       let dismissed = "";
       try { dismissed = sessionStorage.getItem("ranilix.banner.dismissed") || ""; } catch { /* ignore */ }
@@ -267,11 +277,12 @@ function Inbox() {
 
   const enableNotifications = async () => {
     if (!notificationsSupported) return;
-    try { setPermission(await Notification.requestPermission()); } catch { /* ignore */ }
+    try { setPermission(await enablePush()); } catch { /* ignore */ }
   };
 
   // Signs out only this account; if other accounts are saved, the inbox switches to the next one.
   const logout = async () => {
+    await unlinkPush();
     await logOut();
     endSession(email);
     if (!getSession()) navigate("/");
@@ -312,7 +323,7 @@ function Inbox() {
           )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
-          <AccountMenu email={email} onLogout={logout} usage={isAdmin ? null : usage} />
+          <AccountMenu email={email} onLogout={logout} usage={isAdmin ? null : usage} displayName={profile?.displayName} />
         </div>
       </header>
 
@@ -534,7 +545,7 @@ function Inbox() {
         </>)}
       </div>
 
-      {draft && <Compose key={JSON.stringify([draft.mode, draft.subject])} from={email} initial={draft} onClose={() => setDraft(null)} onSend={send} />}
+      {draft && <Compose key={JSON.stringify([draft.mode, draft.subject])} from={email} initial={withSignature(draft, profile?.signature)} onClose={() => setDraft(null)} onSend={send} />}
 
       {toast && (
         <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg">

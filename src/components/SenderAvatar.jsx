@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BRAND } from "../config.js";
 import LogoMark from "./LogoMark.jsx";
+import { avatarUrl, markMissing, useAvatarVersion } from "../lib/avatars.js";
 
 const COLORS = ["bg-brand-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-violet-500", "bg-sky-500"];
 const colorFor = (s) => COLORS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
@@ -35,11 +36,32 @@ export default function SenderAvatar({ name = "", email = "", size = 40 }) {
   const ours = domain === BRAND.domain;
   const showLogo = domain && !ours && !PERSONAL.has(domain) && !failed.has(domain);
   const [broken, setBroken] = useState(false);
+  const [photoBroken, setPhotoBroken] = useState(false);
+  const avatarVersion = useAvatarVersion();
+  const [seenVersion, setSeenVersion] = useState(avatarVersion);
+  if (seenVersion !== avatarVersion) { setSeenVersion(avatarVersion); setPhotoBroken(false); }
   const label = (name || email).trim();
   const box = { width: size, height: size };
 
   if (ours && /^(team|noreply|support|tips|admin|security)@/i.test(email)) {
     return <span className="shrink-0" aria-hidden="true"><LogoMark size={size} /></span>;
+  }
+
+  // Ranilix users can upload a profile photo.
+  const photo = ours ? avatarUrl(email) : null;
+  if (photo && !photoBroken) {
+    return (
+      <img
+        src={photo}
+        alt=""
+        aria-hidden="true"
+        width={size}
+        height={size}
+        className="shrink-0 rounded-full object-cover"
+        style={box}
+        onError={() => { markMissing(email.split("@")[0].toLowerCase()); setPhotoBroken(true); }}
+      />
+    );
   }
 
   if (showLogo && !broken) {
