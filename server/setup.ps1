@@ -119,6 +119,20 @@ if ($gkey -and $gkey.Trim().Length -gt 0) {
   Ok "Skipped"
 }
 
+# 10. Optional: Discord bot token
+Step "Discord bot (optional)"
+Write-Host "    If you have a Discord bot token, paste it here and press Enter."
+Write-Host "    To skip, just press Enter."
+$secure = Read-Host "    Discord bot token" -AsSecureString
+$dkey = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+if ($dkey -and $dkey.Trim().Length -gt 0) {
+  $dkey.Trim() | & npx.cmd wrangler secret put DISCORD_BOT_TOKEN
+  Check "Saving the Discord token"
+  Ok "Discord token saved."
+} else {
+  Ok "Skipped"
+}
+
 # Check it answers
 Step "Checking https://api.ranilix.com (can take a minute the first time)"
 $up = $false

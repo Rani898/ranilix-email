@@ -17,6 +17,8 @@ const live = {
   setAccountLimit: (id, max) => request(`/api/admin/users/${id}/accounts`, { method: "PUT", body: { max }, auth: true }),
   deleteUser: (id, confirm) => request(`/api/admin/users/${id}`, { method: "DELETE", body: { confirm }, auth: true }),
   broadcasts: () => request("/api/admin/broadcasts", { auth: true }),
+  discord: () => request("/api/admin/discord", { auth: true }),
+  discordRegister: () => request("/api/admin/discord/register", { method: "POST", auth: true }),
   reports: (status = "open") => request(`/api/admin/reports?status=${status}`, { auth: true }),
   setReportStatus: (id, status) => request(`/api/admin/reports/${id}`, { method: "PUT", body: { status }, auth: true }),
   deleteReport: (id) => request(`/api/admin/reports/${id}`, { method: "DELETE", auth: true }),
@@ -128,6 +130,8 @@ const demo = {
     save(s);
   },
   async broadcasts() { await delay(150); return { broadcasts: load().broadcasts }; },
+  async discord() { await delay(150); return { appId: "", hasPublicKey: false, hasToken: false, linked: false, channels: {}, inviteUrl: "" }; },
+  async discordRegister() { await delay(300); throw new ApiError("", "discord_no_token"); },
   async reports(status = "open") {
     await delay(150);
     const all = demoReports();

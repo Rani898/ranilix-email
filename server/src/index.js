@@ -8,6 +8,7 @@ import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
+import { discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
 /* Config & helpers                                                    */
@@ -318,6 +319,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM account_owners WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM profiles WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM push_subs WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM discord_links WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
@@ -437,6 +439,18 @@ async function adminRoute(req, env, admin, path, url) {
     }
   }
 
+  // Discord bot
+  if (path === "/api/admin/discord" && req.method === "GET") return json(await discordAdminStatus(env));
+  if (path === "/api/admin/discord/register" && req.method === "POST") {
+    try {
+      return json({ ok: true, commands: await discordRegister(env) });
+    } catch (e) {
+      console.error("discord register", e.message);
+      const code = e.message === "no_token" ? "discord_no_token" : e.message === "no_app_id" ? "discord_no_app" : "discord_failed";
+      throw new HttpError(400, "Couldn't register the Discord commands.", code);
+    }
+  }
+
   // Reports from users
   if (path === "/api/admin/reports" && req.method === "GET") {
     const status = url.searchParams.get("status") || "open";
@@ -498,6 +512,7 @@ async function adminRoute(req, env, admin, path, url) {
           env.DB.prepare("INSERT INTO broadcast_messages (broadcast_id, message_id) VALUES (?, ?)").bind(broadcastId, r.meta.last_row_id)));
       }
     }
+    if (!test) await discordNotify(env, "updates", { title: `📢 ${subj}`.slice(0, 256), description: text.slice(0, 3500), url: "https://rani898.github.io/ranilix-email/" });
     return json({ ok: true, recipients: recipients.length, test: !!test }, 201);
   }
 
@@ -578,6 +593,7 @@ async function route(req, env) {
     await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
     await env.DB.prepare("INSERT OR IGNORE INTO user_meta (user_id, last_login_at) VALUES (?, ?)").bind(userId, Date.now()).run();
     const token = await createSession(env, userId, true);
+    await discordNotify(env, "logs", { title: "🆕 משתמש חדש", description: `\`${email}\`` });
     return json({ token, email }, 201);
   }
 
@@ -614,6 +630,11 @@ async function route(req, env) {
     if (!m) return new Response("Not found", { status: 404, headers: { "Cache-Control": "public, max-age=300" } });
     const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
     return new Response(bytes, { headers: { "Content-Type": m[1], "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff" } });
+  }
+
+  // Discord slash commands (Discord signs every request; checked inside).
+  if (path === "/api/discord/interactions" && req.method === "POST") {
+    return discordInteraction(req, env, { json, validateUsername, RESERVED, insertMessage, notifyUser, rateLimit });
   }
 
   if (path === "/api/push/key" && req.method === "GET") return json({ publicKey: await vapidPublicKey(env) });
@@ -695,6 +716,7 @@ async function route(req, env) {
     await env.DB.prepare("INSERT INTO reports (user_id, email, category, message, page, user_agent, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')")
       .bind(user.id, user.email, REPORT_CATEGORIES.has(category) ? category : "other", text.slice(0, 3000), String(page || "").slice(0, 200),
         (req.headers.get("User-Agent") || "").slice(0, 300), Date.now()).run();
+    await discordNotify(env, "logs", { title: "🚩 דיווח חדש מהאתר", description: text.slice(0, 1500), fields: [{ name: "מאת", value: user.email, inline: true }, { name: "סוג", value: REPORT_CATEGORIES.has(category) ? category : "other", inline: true }] });
     return json({ ok: true }, 201);
   }
 

@@ -141,3 +141,13 @@ CREATE TABLE IF NOT EXISTS push_subs (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (endpoint, user_id)
 );
+
+-- Discord accounts linked to Ranilix addresses with /verify (code_hash is set while a code is pending).
+CREATE TABLE IF NOT EXISTS discord_links (
+  discord_id   TEXT PRIMARY KEY,
+  user_id      INTEGER NOT NULL,
+  code_hash    TEXT,
+  code_expires INTEGER NOT NULL DEFAULT 0,
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  verified_at  INTEGER
+);

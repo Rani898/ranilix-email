@@ -683,6 +683,55 @@ function BroadcastTab({ toast }) {
 
 /* ---------- Settings ---------- */
 
+/** Discord bot: setup checklist + "register commands" button. */
+function DiscordCard({ toast }) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { adminApi.discord().then(setD).catch(() => setD({})); }, []);
+
+  const register = async () => {
+    setBusy(true);
+    try { const r = await adminApi.discordRegister(); toast(t("admin.discord.registered", { n: r.commands })); } catch (e) { toast(errorText(e)); }
+    setBusy(false);
+  };
+
+  const Item = ({ done, children }) => (
+    <li className="flex items-start gap-2.5">
+      <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${done ? "bg-emerald-500 text-white" : "border-2 border-slate-300"}`}>{done && <Check className="h-3.5 w-3.5" />}</span>
+      <span className={done ? "text-slate-500" : "text-slate-800"}>{children}</span>
+    </li>
+  );
+
+  return (
+    <Card className="p-5">
+      <h2 className="font-bold text-slate-900">{t("admin.discord.title")}</h2>
+      <p className="mt-1 text-sm text-slate-500">{t("admin.discord.text")}</p>
+      {!d ? <Spinner /> : (
+        <>
+          <ol className="mt-4 space-y-2.5 text-sm">
+            <Item done={!!d.appId && d.hasPublicKey}>{t("admin.discord.stepIds")}</Item>
+            <Item done={d.hasToken}>{t("admin.discord.stepToken")}</Item>
+            <Item done={false}>{t("admin.discord.stepEndpoint")} <code dir="ltr" className="mt-1 block w-fit max-w-full break-all rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800">https://api.{BRAND.domain}/api/discord/interactions</code></Item>
+            <Item done={d.linked}>{t("admin.discord.stepInvite")}</Item>
+            <Item done={d.linked}>{t("admin.discord.stepSetup")}</Item>
+          </ol>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button onClick={register} disabled={busy || !d.appId || !d.hasToken}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("admin.discord.register")}</Button>
+            {d.inviteUrl && <a href={d.inviteUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">{t("admin.discord.invite")}</a>}
+          </div>
+          {d.linked && (
+            <p className="mt-4 text-sm text-slate-600">
+              {t("admin.discord.linked")} {["updates", "logs", "role"].map((k) => <span key={k} className={`ms-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${d.channels?.[k] ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{t(`admin.discord.ch.${k}`)}</span>)}
+            </p>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 function SettingsTab({ toast }) {
   const { t } = useI18n();
   const errorText = useErrorText();
@@ -754,6 +803,7 @@ function SettingsTab({ toast }) {
           <Toggle id="signups-open" checked={s.signupsOpen} disabled={saving} onChange={(v) => save({ signupsOpen: v })} label={t("admin.settings.signupsOpen")} description={t("admin.settings.signupsText")} />
         </div>
       </Card>
+      <DiscordCard toast={toast} />
     </div>
   );
 }
