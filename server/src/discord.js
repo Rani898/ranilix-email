@@ -39,6 +39,8 @@ export const COMMANDS = [
     ] },
   { name: "stats", description: "נתוני האתר (למנהלים)", ...ADMIN_ONLY },
   { name: "setup", description: "חיבור הבוט לשרת הזה (למנהלים)", ...ADMIN_ONLY },
+  { name: "verify-panel", description: "שליחת פאנל אימות עם כפתור לערוץ הזה (למנהלים)", ...ADMIN_ONLY,
+    options: [{ type: 5, name: "lock", description: "להסתיר את שאר הערוצים ממי שעוד לא לחץ על הכפתור", required: false }] },
 ];
 
 /* ---------- Discord REST ---------- */
@@ -118,6 +120,7 @@ export async function discordInteraction(req, env, h) {
   const i = JSON.parse(body);
 
   if (i.type === 1) return h.json({ type: 1 }); // PING from Discord when you save the endpoint URL
+  if (i.type === 3 && i.data?.custom_id === "ranilix_verify") return verifyButton(env, i, h);
   if (i.type !== 2) return h.json({ type: 4, data: { content: "🤷", flags: EPHEMERAL } });
 
   const user = i.member?.user || i.user || {};
@@ -249,6 +252,43 @@ export async function discordInteraction(req, env, h) {
       })] });
     }
 
+    if (name === "verify-panel") {
+      if (!isAdminMember(i)) return reply(h.json, "רק למנהלים.");
+      if (!env.DISCORD_BOT_TOKEN) return reply(h.json, "❌ חסר טוקן של הבוט בשרת.");
+      const lock = opt(options, "lock") === true;
+      const roles = await rest(env, "GET", `/guilds/${i.guild_id}/roles`);
+      const everyone = roles.find((r) => r.id === i.guild_id);
+      let member = roles.find((r) => r.name === MEMBER_ROLE);
+      if (!member) {
+        member = await rest(env, "POST", `/guilds/${i.guild_id}/roles`, { name: MEMBER_ROLE, color: 0x22c55e, permissions: everyone.permissions, hoist: false });
+      }
+      await saveSetting(env, "member_role", member.id);
+      await rest(env, "POST", `/channels/${i.channel_id}/messages`, {
+        embeds: [embed({
+          title: "✅ אימות",
+          description: "ברוכים הבאים לשרת של **Ranilix**!\n\nלחצו על הכפתור למטה כדי לאשר שקראתם את החוקים ולקבל גישה לכל הערוצים.",
+          footer: { text: "Ranilix Email Free" },
+        })],
+        components: [{ type: 1, components: [{ type: 2, style: 3, custom_id: "ranilix_verify", label: "אני מאשר/ת את החוקים", emoji: { name: "✅" } }] }],
+      });
+      let lockNote = "";
+      if (lock) {
+        // Everyone loses "View channels" by default; every existing role (and the new one) gets it, so only
+        // people with a role see the server. Channels that explicitly allow @everyone (welcome, rules…) stay visible.
+        const VIEW = 1n << 10n;
+        const base = BigInt(everyone.permissions) | VIEW;
+        for (const r of roles) {
+          if (r.id === everyone.id || r.managed) continue;
+          const next = BigInt(r.permissions) | base;
+          if (next !== BigInt(r.permissions)) await rest(env, "PATCH", `/guilds/${i.guild_id}/roles/${r.id}`, { permissions: String(next) });
+        }
+        await rest(env, "PATCH", `/guilds/${i.guild_id}/roles/${member.id}`, { permissions: String(BigInt(member.permissions) | base) });
+        await rest(env, "PATCH", `/guilds/${i.guild_id}/roles/${everyone.id}`, { permissions: String(BigInt(everyone.permissions) & ~VIEW) });
+        lockNote = "\n🔒 מעכשיו מי שלא לחץ על הכפתור רואה רק את ערוצי המידע (ברוכים הבאים, חוקים…). חברים שכבר בשרת בלי תפקיד יצטרכו ללחוץ גם הם.";
+      }
+      return reply(h.json, `✅ הפאנל נשלח. מי שלוחץ מקבל את התפקיד <@&${member.id}>.${lockNote}`);
+    }
+
     if (name === "setup") {
       if (!isAdminMember(i)) return reply(h.json, "רק למנהלים.");
       if (!env.DISCORD_BOT_TOKEN) return reply(h.json, "❌ חסר טוקן של הבוט בשרת. הריצו את setup.bat והדביקו אותו בשלב של Discord.");
@@ -279,6 +319,22 @@ export async function discordInteraction(req, env, h) {
   return reply(h.json, "🤷 פקודה לא מוכרת.");
 }
 
+const MEMBER_ROLE = "✅ מאומת";
+
+async function verifyButton(env, i, h) {
+  const user = i.member?.user || {};
+  try {
+    const roleId = (await discordSettings(env)).member_role;
+    if (!roleId) return reply(h.json, "האימות עוד לא הוגדר. בקשו מהצוות להריץ /verify-panel.");
+    if ((i.member?.roles || []).includes(roleId)) return reply(h.json, "✅ כבר אימתתם. ברוכים הבאים!");
+    await rest(env, "PUT", `/guilds/${i.guild_id}/members/${user.id}/roles/${roleId}`);
+    return reply(h.json, "🎉 אומתתם! עכשיו אתם רואים את כל הערוצים. תהנו!\nיש לכם כתובת ב-Ranilix? כתבו `/verify start` כדי לקבל גם את התפקיד 📧 משתמש Ranilix.");
+  } catch (e) {
+    console.error("verify button", e.message);
+    return reply(h.json, "😕 לא הצלחנו לתת את התפקיד. ודאו שהתפקיד של הבוט נמצא מעל ✅ מאומת, או פנו לצוות.");
+  }
+}
+
 /* ---------- Admin panel ---------- */
 
 export async function discordAdminStatus(env) {
@@ -289,7 +345,7 @@ export async function discordAdminStatus(env) {
     hasToken: !!env.DISCORD_BOT_TOKEN,
     linked: !!s.guild,
     channels: { updates: !!s.updates, logs: !!s.logs, role: !!s.role },
-    inviteUrl: env.DISCORD_APP_ID ? `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_APP_ID}&scope=bot+applications.commands&permissions=268454912` : "",
+    inviteUrl: env.DISCORD_APP_ID ? `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_APP_ID}&scope=bot+applications.commands&permissions=8` : "",
   };
 }
 
