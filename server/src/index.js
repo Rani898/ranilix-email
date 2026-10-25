@@ -378,13 +378,18 @@ async function adminRoute(req, env, admin, path, url, log) {
     // Address counts per person, for the owners on this page (2 queries, not one per row).
     const owners = [...new Set(results.map((u) => u.owner_id))];
     const used = new Map(owners.map((o) => [o, 0]));
+    const linked = new Map(owners.map((o) => [o, []]));
     const limits = new Map();
     if (owners.length) {
       const marks = owners.map(() => "?").join(",");
-      const { results: cnt } = await env.DB.prepare(`
-        SELECT COALESCE(ao.owner_id, u.id) AS o, COUNT(*) AS n FROM users u LEFT JOIN account_owners ao ON ao.user_id = u.id
-        WHERE COALESCE(ao.owner_id, u.id) IN (${marks}) GROUP BY o`).bind(...owners).all();
-      for (const r of cnt) used.set(r.o, r.n);
+      // Every address in each person's group, so the admin can see which addresses belong together.
+      const { results: grp } = await env.DB.prepare(`
+        SELECT COALESCE(ao.owner_id, u.id) AS o, u.id, u.username, u.created_at FROM users u LEFT JOIN account_owners ao ON ao.user_id = u.id
+        WHERE COALESCE(ao.owner_id, u.id) IN (${marks}) ORDER BY u.created_at`).bind(...owners).all();
+      for (const r of grp) {
+        used.set(r.o, (used.get(r.o) || 0) + 1);
+        linked.get(r.o)?.push({ id: String(r.id), email: `${r.username}@${env.MAIL_DOMAIN}`, createdAt: r.created_at, main: r.id === r.o });
+      }
       const { results: lim } = await env.DB.prepare(`SELECT owner_id, max_accounts FROM account_limits WHERE owner_id IN (${marks})`).bind(...owners).all();
       for (const r of lim) limits.set(r.owner_id, r.max_accounts);
     }
@@ -394,6 +399,7 @@ async function adminRoute(req, env, admin, path, url, log) {
         id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
         accounts: { used: used.get(u.owner_id) || 1, max: limits.get(u.owner_id) ?? DEFAULT_ACCOUNTS },
+        linked: linked.get(u.owner_id) || [],
       })),
     });
   }

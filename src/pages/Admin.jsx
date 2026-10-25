@@ -9,6 +9,7 @@ import {
   RotateCcw,
   HardDrive,
   KeyRound,
+  Link2,
   LayoutDashboard,
   Loader2,
   Mail,
@@ -302,6 +303,42 @@ function ResetModal({ user, onClose, onDone }) {
   );
 }
 
+function LinkedList({ user, onPick }) {
+  const { t } = useI18n();
+  const f = useFormatters();
+  const list = user.linked?.length ? user.linked : [{ id: user.id, email: user.email, createdAt: user.createdAt, main: true }];
+  return (
+    <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+      {list.map((a) => (
+        <li key={a.id} className={`flex items-center gap-3 px-3 py-2.5 ${a.id === user.id ? "bg-brand-50" : ""}`}>
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-xs font-bold text-brand-700" aria-hidden="true">{a.email[0].toUpperCase()}</span>
+          <div className="min-w-0 flex-1">
+            {onPick && a.id !== user.id
+              ? <button type="button" onClick={() => onPick(a.email)} className="block truncate font-medium text-brand-700 hover:underline" dir="ltr">{a.email}</button>
+              : <span dir="ltr" className="block truncate font-medium text-slate-900">{a.email}</span>}
+            <span className="text-xs text-slate-500">{t("admin.users.linkedCreated", { date: f.date(a.createdAt) })}</span>
+          </div>
+          {a.main && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">{t("admin.users.linkedMain")}</span>}
+          {a.id === user.id && <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-700">{t("admin.users.linkedThis")}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function LinkedModal({ user, onClose, onPick }) {
+  const { t } = useI18n();
+  const n = user.linked?.length || 1;
+  return (
+    <Modal title={t("admin.users.linkedTitle", { email: user.email })} onClose={onClose}
+      footer={<Button variant="ghost" onClick={onClose}>{t("admin.users.close")}</Button>}>
+      <p>{n > 1 ? t("admin.users.linkedText", { n }) : t("admin.users.linkedNone")}</p>
+      <LinkedList user={user} onPick={onPick} />
+      <p className="mt-3 text-xs text-slate-500">{t("admin.users.linkedHint")}</p>
+    </Modal>
+  );
+}
+
 function AccountsModal({ user, onClose, onDone }) {
   const { t } = useI18n();
   const errorText = useErrorText();
@@ -320,6 +357,7 @@ function AccountsModal({ user, onClose, onDone }) {
       footer={<><Button variant="ghost" onClick={onClose}>{t("admin.users.cancel")}</Button><Button onClick={run} disabled={busy || !valid}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("admin.users.accountsSave")}</Button></>}>
       <p>{t("admin.users.accountsText")}</p>
       <p className="mt-3 font-semibold text-slate-800">{t("admin.users.accountsUsed", { used, max: user.accounts?.max ?? 5 })}</p>
+      <LinkedList user={user} />
       <label htmlFor="accounts-max" className="mt-4 block text-sm font-semibold text-slate-800">{t("admin.users.accountsLabel")}</label>
       <div className="mt-1.5 flex items-center gap-2">
         <button type="button" onClick={() => setMax(String(Math.max(1, (Number(max) || 1) - 1)))} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-300 text-lg font-bold text-slate-700 hover:bg-slate-100" aria-label="-1">−</button>
@@ -413,7 +451,14 @@ function UsersTab({ toast }) {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-xs font-bold text-brand-700" aria-hidden="true">{u.email[0].toUpperCase()}</span>
-                        <span dir="ltr" className="truncate font-medium text-slate-900">{u.email}</span>
+                        <div className="min-w-0">
+                          <span dir="ltr" className="block truncate font-medium text-slate-900">{u.email}</span>
+                          {u.linked?.length > 1 && (
+                            <button type="button" onClick={() => setDialog({ kind: "linked", user: u })} className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-100">
+                              <Link2 className="h-3 w-3" aria-hidden="true" />{t("admin.users.linkedBadge", { n: u.linked.length - 1 })}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">{f.date(u.createdAt)}</td>
@@ -431,6 +476,7 @@ function UsersTab({ toast }) {
                         {!u.admin && (u.suspended
                           ? <IconAction label={t("admin.users.restore")} icon={UserCheck} onClick={() => restore(u)} />
                           : <IconAction label={t("admin.users.suspend")} icon={UserX} onClick={() => setDialog({ kind: "suspend", user: u })} />)}
+                        <IconAction label={t("admin.users.linkedAction")} icon={Link2} onClick={() => setDialog({ kind: "linked", user: u })} />
                         <IconAction label={t("admin.users.accountsAction")} icon={Mails} onClick={() => setDialog({ kind: "accounts", user: u })} />
                         <IconAction label={t("admin.users.resetPassword")} icon={KeyRound} onClick={() => setDialog({ kind: "reset", user: u })} />
                         {!u.admin && <IconAction danger label={t("admin.users.delete")} icon={Trash2} onClick={() => setDialog({ kind: "delete", user: u })} />}
@@ -451,6 +497,7 @@ function UsersTab({ toast }) {
 
       {dialog?.kind === "suspend" && <SuspendModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.suspendedToast", dialog.user)} />}
       {dialog?.kind === "reset" && <ResetModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.resetDone", dialog.user)} />}
+      {dialog?.kind === "linked" && <LinkedModal user={dialog.user} onClose={() => setDialog(null)} onPick={(email) => { setDialog(null); setQ(email.split("@")[0]); }} />}
       {dialog?.kind === "accounts" && <AccountsModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.accountsDone", dialog.user)} />}
       {dialog?.kind === "delete" && <DeleteModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.deletedToast", dialog.user)} />}
     </div>

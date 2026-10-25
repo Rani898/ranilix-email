@@ -49,6 +49,13 @@ function seed() {
     accounts: { used: 1 + (i % 3), max: 5 },
   }));
   users.push({ id: "1", email: me, createdAt: now - 20 * DAY, lastLoginAt: now, messages: 9, storageBytes: 0, suspended: false, admin: true, accounts: { used: 1, max: 5 } });
+  // Demo: the first three addresses belong to the same person.
+  const group = users.slice(0, 3).reverse().map((u, i) => ({ id: u.id, email: u.email, createdAt: u.createdAt, main: i === 0 }));
+  for (const u of users) {
+    const inGroup = group.some((g) => g.id === u.id);
+    u.linked = inGroup ? group : [{ id: u.id, email: u.email, createdAt: u.createdAt, main: true }];
+    u.accounts = { ...u.accounts, used: u.linked.length };
+  }
   return {
     users,
     broadcasts: [{ id: "b1", subject: "Dark mode is here 🌙", body: "Hi!\n\nRanilix now has dark mode.", createdAt: now - 3 * DAY, sentBy: "rani", recipients: 12, read: 8 }],
