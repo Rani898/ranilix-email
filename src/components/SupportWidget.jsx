@@ -586,7 +586,7 @@ export default function SupportWidget() {
     <>
       {open && (
         <div ref={panelRef} role="dialog" aria-modal="false" aria-label={t("support.launcher")}
-          className="fixed inset-0 z-[47] flex flex-col overflow-hidden bg-surface shadow-2xl sm:inset-auto sm:bottom-24 sm:end-5 sm:h-[min(680px,calc(100dvh-8rem))] sm:w-[390px] sm:rounded-3xl sm:border sm:border-slate-200 animate-[supportIn_.18s_ease-out]">
+          className="fixed inset-0 z-[47] flex flex-col overflow-hidden bg-surface shadow-2xl sm:inset-auto sm:bottom-24 sm:right-5 sm:h-[min(680px,calc(100dvh-8rem))] sm:w-[390px] sm:rounded-3xl sm:border sm:border-slate-200 animate-[supportIn_.18s_ease-out]">
           <div className="flex min-h-0 flex-1 flex-col">{body}</div>
           {showNav && (
             <nav className="grid shrink-0 grid-cols-3 border-t border-slate-200 bg-surface" aria-label={t("support.launcher")}>
@@ -607,7 +607,7 @@ export default function SupportWidget() {
       )}
 
       {teaser && !open && (
-        <div className="fixed bottom-24 end-5 z-[45] flex max-w-[260px] items-start gap-2 rounded-2xl border border-slate-200 bg-surface p-3 shadow-xl animate-[supportIn_.2s_ease-out]">
+        <div className="fixed bottom-24 right-5 z-[45] flex max-w-[260px] items-start gap-2 rounded-2xl border border-slate-200 bg-surface p-3 shadow-xl animate-[supportIn_.2s_ease-out]">
           <TeamAvatar size={28} />
           <button type="button" onClick={() => { setTeaser(false); setOpen(true); }} className="text-start text-sm text-slate-800">{t("support.teaser")}</button>
           <button type="button" onClick={() => setTeaser(false)} className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-slate-400 hover:bg-slate-100" aria-label={t("support.teaserClose")}><X className="h-3.5 w-3.5" /></button>
@@ -616,9 +616,9 @@ export default function SupportWidget() {
 
       <button type="button" onClick={() => { setOpen((o) => !o); setTeaser(false); }}
         aria-label={open ? t("support.close") : t("support.launcher")} aria-expanded={open}
-        className={`fixed bottom-5 end-5 z-[46] grid h-14 w-14 place-items-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 transition hover:scale-105 hover:bg-brand-500 ${open ? "max-sm:hidden" : ""}`}>
+        className={`fixed bottom-5 right-5 z-[46] grid h-14 w-14 place-items-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 transition hover:scale-105 hover:bg-brand-500 ${open ? "max-sm:hidden" : ""}`}>
         {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
-        {!open && unread > 0 && <span className="absolute -top-1 -end-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white ring-2 ring-white">{unread}</span>}
+        {!open && unread > 0 && <span className="absolute -top-1 -right-1 grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white ring-2 ring-white">{unread}</span>}
       </button>
     </>
   );
