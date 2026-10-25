@@ -399,6 +399,7 @@ export default {
     fillBoth: "הזינו אימייל וסיסמה.",
   },
   errors: {
+    name_reserved: "השם הזה שמור לצוות של Ranilix. בחרו שם אחר.",
     discord_no_token: "הטוקן של בוט הדיסקורד עוד לא שמור בשרת. הריצו את setup.bat והדביקו אותו.",
     discord_no_app: "חסר ה-Application ID של דיסקורד ב-wrangler.toml.",
     discord_failed: "דיסקורד לא קיבל את הבקשה. בדקו את הטוקן ואת ה-Application ID.",

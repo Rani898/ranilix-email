@@ -275,6 +275,8 @@ async function firstValidUser(env, tokens) {
 /* ---- Profiles (display name, signature, photo) ---- */
 
 const MAX_AVATAR_CHARS = 200_000; // a 256px JPEG data URL is ~20–40 KB
+// Names that could be used to pretend to be the site's staff.
+const STAFF_NAME_RE = /ranilix|admin|support|security|official|team|staff|צוות|מנהל|תמיכה|אבטחה|רשמי/i;
 const cleanName = (s) => String(s || "").replace(/[<>"\r\n\t]/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
 async function getProfile(env, userId) {
   const row = await env.DB.prepare("SELECT display_name, signature, avatar IS NOT NULL AS has_avatar, updated_at FROM profiles WHERE user_id = ?").bind(userId).first();
@@ -552,7 +554,7 @@ async function route(req, env) {
 
   if (path === "/api/username-available" && req.method === "GET") {
     const u = (url.searchParams.get("u") || "").toLowerCase();
-    if (validateUsername(u) || RESERVED.has(u)) return json({ available: false });
+    if (validateUsername(u) || RESERVED.has(u) || isAdmin(env, u)) return json({ available: false });
     const row = await env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(u).first();
     return json({ available: !row });
   }
@@ -562,7 +564,8 @@ async function route(req, env) {
     const u = String(username || "").toLowerCase();
     const uErr = validateUsername(u);
     if (uErr) throw new HttpError(400, uErr);
-    if (RESERVED.has(u)) throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
+    // Reserved names, and names listed as admins (so nobody can register an admin name that's free).
+    if (RESERVED.has(u) || isAdmin(env, u)) throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
     const pErr = validatePassword(password);
     if (pErr) throw new HttpError(400, pErr);
     if (!(await getSettings(env)).signupsOpen) throw new HttpError(403, "New sign-ups are paused right now.", "signups_closed");
@@ -601,12 +604,21 @@ async function route(req, env) {
     const { email, password, remember } = await readJson(req);
     await rateLimit(env, `login:${ip}`, 20, 15 * 60 * 1000);
     const u = String(email || "").toLowerCase().trim().replace(new RegExp(`@${env.MAIL_DOMAIN.replace(/\./g, "\\.")}$`), "");
+    // Per-address limit too, so a password can't be guessed from many different IPs.
+    const failKey = `loginfail:${u.slice(0, 40)}`;
+    const fails = await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE key = ?").bind(failKey).first();
+    if (fails && Date.now() - fails.window_start < 15 * 60 * 1000 && fails.count >= 10) {
+      throw new HttpError(429, "Too many attempts. Please wait a bit and try again.", "rate_limited");
+    }
     const user = await env.DB.prepare("SELECT id, username, password_hash, salt FROM users WHERE username = ?").bind(u).first();
     // Same message whether the user exists or not, so accounts can't be discovered.
     const fail = new HttpError(401, "That email or password isn't right.", "bad_login");
-    if (!user || typeof password !== "string") throw fail;
-    const hash = await hashPassword(password, user.salt);
-    if (!safeEqual(hash, user.password_hash)) throw fail;
+    const ok = user && typeof password === "string" && password.length <= 200 && safeEqual(await hashPassword(password, user.salt), user.password_hash);
+    if (!ok) {
+      await rateLimit(env, failKey, 1_000_000, 15 * 60 * 1000); // just counts failures
+      throw fail;
+    }
+    await env.DB.prepare("DELETE FROM rate_limits WHERE key = ?").bind(failKey).run();
     if (await isSuspended(env, user.id)) throw new HttpError(403, "This account is suspended.", "suspended");
     await env.DB.prepare("INSERT INTO user_meta (user_id, last_login_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET last_login_at = excluded.last_login_at")
       .bind(user.id, Date.now()).run();
@@ -663,7 +675,12 @@ async function route(req, env) {
   if (path === "/api/profile" && req.method === "PUT") {
     const { displayName, signature } = await readJson(req);
     const fields = {};
-    if (displayName !== undefined) fields.display_name = cleanName(displayName);
+    if (displayName !== undefined) {
+      fields.display_name = cleanName(displayName);
+      if (STAFF_NAME_RE.test(fields.display_name) && !isAdmin(env, user.username)) {
+        throw new HttpError(400, "That name is reserved for the Ranilix team.", "name_reserved");
+      }
+    }
     if (signature !== undefined) fields.signature = String(signature || "").slice(0, 1000);
     await upsertProfile(env, user.id, fields);
     return json(await getProfile(env, user.id));
@@ -792,7 +809,9 @@ async function route(req, env) {
 
   if (path === "/api/send" && req.method === "POST") {
     const { to, subject, body, forward, files } = await readSendRequest(req);
-    const senderName = (await getProfile(env, user.id)).displayName || user.username;
+    const savedName = (await getProfile(env, user.id)).displayName;
+    // Never let a regular user's mail look like it came from the staff (even if the name was saved before this rule).
+    const senderName = savedName && (isAdmin(env, user.username) || !STAFF_NAME_RE.test(savedName)) ? savedName : user.username;
     const recipients = [...new Set(String(to || "").toLowerCase().split(/[,;\s]+/).filter(Boolean))];
     if (!recipients.length) throw new HttpError(400, "Add at least one recipient.");
     if (recipients.length > 10) throw new HttpError(400, "You can send to up to 10 people at once.", "too_many_recipients");
@@ -889,13 +908,25 @@ async function route(req, env) {
 /* Worker entry points                                                 */
 /* ------------------------------------------------------------------ */
 
+// Sent with every API response: no sniffing, no framing, no caching of private mail.
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+  "Cache-Control": "no-store",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+};
+
 export default {
   async fetch(req, env) {
     const cors = corsHeaders(req, env);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     try {
       const res = await route(req, env);
-      for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+      for (const [k, v] of Object.entries({ ...SECURITY_HEADERS, ...cors })) {
+        if (k === "Cache-Control" && res.headers.has("Cache-Control")) continue;
+        res.headers.set(k, v);
+      }
       return res;
     } catch (err) {
       const isHttp = err instanceof HttpError;
@@ -905,7 +936,7 @@ export default {
           ? { error: err.message, code: err.code, params: err.params }
           : { error: "Something went wrong on our side. Please try again.", code: "generic" },
         isHttp ? err.status : 500,
-        cors,
+        { ...SECURITY_HEADERS, ...cors },
       );
     }
   },
@@ -919,6 +950,14 @@ export default {
     const user = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(local).first();
     if (!user || (await isSuspended(env, user.id))) return message.setReject("Address not found");
     if (message.rawSize > MAX_INBOUND_BYTES) return message.setReject("Message too large");
+
+    // Flood protection: per recipient and per sender (stops someone filling a mailbox or the storage).
+    try {
+      await rateLimit(env, `in:${user.id}`, 300, DAY);
+      await rateLimit(env, `insender:${String(message.from || "").toLowerCase().slice(0, 120)}`, 60, 3600 * 1000);
+    } catch {
+      return message.setReject("Too many messages, try again later");
+    }
 
     const raw = await new Response(message.raw).arrayBuffer();
     const parsed = await PostalMime.parse(raw);
@@ -936,10 +975,20 @@ export default {
     }
     const note = skipped ? `\n\n[${skipped} attachment(s) were too large or couldn't be saved]` : "";
 
+    // Anti-spoofing: mail from outside can't claim to be from our own domain (e.g. "team@ranilix.com"),
+    // and a "Ranilix" display name from another domain gets a warning sign.
+    let fromAddr = String(parsed.from?.address || message.from || "").slice(0, 200);
+    let fromName = String(parsed.from?.name || "").replace(/[\r\n]/g, " ").slice(0, 120);
+    if (fromAddr.toLowerCase().endsWith(`@${env.MAIL_DOMAIN}`)) {
+      fromName = `⚠️ ${fromName || fromAddr} (unverified)`;
+      fromAddr = String(message.from || "unknown").slice(0, 200);
+    } else if (STAFF_NAME_RE.test(fromName) && /ranilix/i.test(fromName)) {
+      fromName = `⚠️ ${fromName}`;
+    }
     const messageId = await insertMessage(env, user.id, {
       folder: "inbox",
-      fromName: parsed.from?.name || "",
-      fromAddr: parsed.from?.address || message.from,
+      fromName,
+      fromAddr,
       to,
       subject: parsed.subject || "(no subject)",
       body: body + note,

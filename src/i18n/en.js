@@ -399,6 +399,7 @@ export default {
     fillBoth: "Please enter your email and password.",
   },
   errors: {
+    name_reserved: "That name is reserved for the Ranilix team. Pick another one.",
     discord_no_token: "The Discord bot token isn't saved on the server yet. Run setup.bat and paste it.",
     discord_no_app: "The Discord Application ID is missing in wrangler.toml.",
     discord_failed: "Discord didn't accept the request. Check the token and the Application ID.",

@@ -193,7 +193,12 @@ export async function discordInteraction(req, env, h) {
         await h.rateLimit(env, `dverify:${user.id}`, 5, 3600 * 1000);
         const local = String(opt(sub.options, "email") || "").toLowerCase().trim().replace(new RegExp(`@${domain.replace(/\./g, "\\.")}$`), "");
         const target = local && await env.DB.prepare("SELECT id, username FROM users WHERE username = ?").bind(local).first();
+        let send = !!target;
         if (target) {
+          // Max 3 codes an hour per address, so nobody can flood an inbox. Same reply either way.
+          try { await h.rateLimit(env, `dverifyto:${target.id}`, 3, 3600 * 1000); } catch { send = false; }
+        }
+        if (send) {
           const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
           await env.DB.prepare("INSERT OR REPLACE INTO discord_links (discord_id, user_id, code_hash, code_expires, attempts, verified_at) VALUES (?, ?, ?, ?, 0, NULL)")
             .bind(user.id, target.id, await sha256(`${user.id}:${code}`), Date.now() + CODE_TTL).run();
