@@ -39,6 +39,11 @@ export const COMMANDS = [
     ] },
   { name: "stats", description: "נתוני האתר (למנהלים)", ...ADMIN_ONLY },
   { name: "setup", description: "חיבור הבוט לשרת הזה (למנהלים)", ...ADMIN_ONLY },
+  { name: "block-links", description: "חסימת קישורים והזמנות לשרתים אחרים (למנהלים)", ...ADMIN_ONLY,
+    options: [
+      { type: 5, name: "links", description: "לחסום קישורים לאתרים (חוץ מהאתר של Ranilix)", required: false },
+      { type: 5, name: "invites", description: "לחסום הזמנות לשרתי דיסקורד אחרים", required: false },
+    ] },
   { name: "verify-panel", description: "שליחת פאנל אימות עם כפתור לערוץ הזה (למנהלים)", ...ADMIN_ONLY,
     options: [{ type: 5, name: "lock", description: "להסתיר את שאר הערוצים ממי שעוד לא לחץ על הכפתור", required: false }] },
 ];
@@ -305,6 +310,19 @@ export async function discordInteraction(req, env, h) {
       })] });
     }
 
+    if (name === "block-links") {
+      if (!isAdminMember(i)) return reply(h.json, "רק למנהלים.");
+      if (!env.DISCORD_BOT_TOKEN) return reply(h.json, "❌ חסר טוקן של הבוט בשרת.");
+      const want = { links: opt(options, "links") !== false, invites: opt(options, "invites") !== false };
+      const finish = setupAutoMod(env, i, want).then((text) => followUp(env, i, text)).catch((e) => {
+        console.error("automod", e.message);
+        return followUp(env, i, "😕 לא הצלחתי להגדיר את החסימה. ודאו שלבוט יש הרשאת מנהל ונסו שוב.");
+      });
+      h.log?.("admin", "🔗 חסימת קישורים עודכנה", { "מנהל": `<@${user.id}>`, "קישורים": want.links ? "חסום" : "מותר", "הזמנות": want.invites ? "חסום" : "מותר" });
+      if (h.ctx?.waitUntil) h.ctx.waitUntil(finish); else await finish;
+      return h.json({ type: 5, data: { flags: EPHEMERAL } });
+    }
+
     if (name === "verify-panel") {
       if (!isAdminMember(i)) return reply(h.json, "רק למנהלים.");
       if (!env.DISCORD_BOT_TOKEN) return reply(h.json, "❌ חסר טוקן של הבוט בשרת.");
@@ -362,6 +380,74 @@ export async function discordInteraction(req, env, h) {
 }
 
 const MEMBER_ROLE = "✅ מאומת";
+
+/* ---------- AutoMod: block links and invites (Discord enforces it, even while the bot is offline) ---------- */
+
+const AUTOMOD = {
+  invites: {
+    name: "Ranilix · חסימת הזמנות",
+    patterns: [
+      "(?i)discord(app)?\\s*\\.\\s*(gg|io|me|li|com\\s*/\\s*invite)\\s*/\\s*\\S+",
+      "(?i)\\b(dsc\\.gg|invite\\.gg|discord\\.link|dis\\.gd)\\s*/\\s*\\S+",
+    ],
+    message: "🚫 אסור לפרסם הזמנות לשרתי דיסקורד אחרים.",
+  },
+  links: {
+    name: "Ranilix · חסימת קישורים",
+    patterns: [
+      "(?i)\\bhttps?://\\S+",
+      "(?i)\\bwww\\.\\S+\\.\\S+",
+      "(?i)\\b[a-z0-9-]{2,}\\.(com|net|org|io|co|me|xyz|gg|ly|info|biz|ru|tk|link|click|top|site|online|shop|app|dev|co\\.il)(/\\S*)?\\b",
+    ],
+    message: "🔗 אסור לשלוח קישורים בשרת. צריך לשתף משהו? פנו לצוות.",
+  },
+};
+// Our own site and server stay allowed.
+const AUTOMOD_ALLOW = ["*rani898.github.io*", "*ranilix.com*", "*discord.gg/EfgYMfQBp*", "*discord.com/invite/EfgYMfQBp*"];
+
+async function setupAutoMod(env, i, want) {
+  const g = i.guild_id;
+  const [rules, roles, s] = await Promise.all([
+    rest(env, "GET", `/guilds/${g}/auto-moderation/rules`),
+    rest(env, "GET", `/guilds/${g}/roles`),
+    discordSettings(env),
+  ]);
+  // Staff can still post links (admins are always exempt in Discord).
+  const exempt = roles.filter((r) => /צוות|מנהל|תמיכה|staff|mod|admin/i.test(r.name) && !r.managed).map((r) => r.id).slice(0, 20);
+  const alert = s.log_security || s.logs;
+  const out = [];
+  for (const [kind, def] of Object.entries(AUTOMOD)) {
+    const existing = rules.find((r) => r.name === def.name);
+    if (!want[kind]) {
+      if (existing) { await rest(env, "DELETE", `/guilds/${g}/auto-moderation/rules/${existing.id}`); out.push(`➖ ${def.name}: כבוי`); }
+      else out.push(`➖ ${def.name}: כבוי`);
+      continue;
+    }
+    const body = {
+      name: def.name,
+      event_type: 1,          // when a message is sent
+      trigger_type: 1,        // keyword / regex
+      trigger_metadata: { regex_patterns: def.patterns, allow_list: AUTOMOD_ALLOW },
+      actions: [
+        { type: 1, metadata: { custom_message: def.message } },          // block the message
+        ...(alert ? [{ type: 2, metadata: { channel_id: alert } }] : []), // and report it in the security log
+      ],
+      enabled: true,
+      exempt_roles: exempt,
+    };
+    if (existing) await rest(env, "PATCH", `/guilds/${g}/auto-moderation/rules/${existing.id}`, body);
+    else await rest(env, "POST", `/guilds/${g}/auto-moderation/rules`, body);
+    out.push(`✅ ${def.name}: פועל`);
+  }
+  return [
+    "🛡️ החסימה הוגדרה (Discord AutoMod):",
+    ...out,
+    "",
+    `מותר: האתר של Ranilix וההזמנה לשרת הזה. מנהלים${exempt.length ? " ותפקידי צוות" : ""} פטורים.`,
+    alert ? `כל הודעה שנחסמת מדווחת ב-<#${alert}>.` : "טיפ: הריצו /setup כדי שהחסימות ידווחו בערוץ האבטחה.",
+    "לכיבוי: `/block-links links:False invites:False`",
+  ].join("\n");
+}
 
 /** Edits the "thinking…" reply of a deferred command. */
 async function followUp(env, i, content) {
