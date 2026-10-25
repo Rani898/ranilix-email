@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Flag, LogOut, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
+import { Check, Flag, LifeBuoy, LogOut, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
+import { openSupport } from "./SupportWidget.jsx";
 import SenderAvatar from "./SenderAvatar.jsx";
 import ReportDialog from "./ReportDialog.jsx";
 import InstallDialog from "./InstallDialog.jsx";
@@ -97,6 +98,10 @@ export default function AccountMenu({ email, onLogout, usage, displayName }) {
                 {t("install.menu")}
               </button>
             )}
+            <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); openSupport("home"); }}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><LifeBuoy className="h-4 w-4" /></span>
+              {t("support.menu")}
+            </button>
             <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); setDialog("report"); }}>
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Flag className="h-4 w-4" /></span>
               {t("report.menu")}

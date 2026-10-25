@@ -7,6 +7,7 @@
 import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
+import { supportAdminRoute, supportRoute } from "./support.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
@@ -120,7 +121,7 @@ function corsHeaders(req, env) {
   const allowed = (env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim()).filter(Boolean);
   const h = {
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Support-Key",
     "Access-Control-Expose-Headers": "Content-Disposition",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -322,12 +323,17 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM profiles WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM push_subs WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM discord_links WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM support_messages WHERE thread_id IN (SELECT id FROM support_threads WHERE user_id = ?)").bind(userId),
+    env.DB.prepare("DELETE FROM support_threads WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
 }
 
 async function adminRoute(req, env, admin, path, url, log) {
+  const sup = await supportAdminRoute(req, env, admin, path, url, { HttpError, json, readJson, log, setSetting, insertMessage, notifyUser });
+  if (sup) return sup;
+
   // GET /api/admin/stats — numbers for the overview page
   if (path === "/api/admin/stats" && req.method === "GET") {
     const now = Date.now();
@@ -358,6 +364,8 @@ async function adminRoute(req, env, admin, path, url, log) {
       outboundToday: (await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE key = 'out:global'").first().then((r) => (r && now - r.window_start < DAY ? r.count : 0))),
       outboundLimit: OUTBOUND_GLOBAL_DAY,
       openReports: (await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").first()).n,
+      supportUnread: (await env.DB.prepare("SELECT COUNT(*) AS n FROM support_threads WHERE admin_unread > 0").first()).n,
+      supportOpen: (await env.DB.prepare("SELECT COUNT(*) AS n FROM support_threads WHERE status = 'open'").first()).n,
     });
   }
 
@@ -688,6 +696,12 @@ async function route(req, env, log) {
 
   // Google redirects the browser here after "Connect Google" (no Ranilix token on this request).
   if (path === "/api/google/callback") return googleRoute(req, env, path, url, null, { HttpError, json, htmlToText, randomHex, log });
+
+  // Help window chat: works for visitors too (it checks the login itself).
+  if (path.startsWith("/api/support/")) {
+    const res = await supportRoute(req, env, path, { HttpError, json, readJson, rateLimit, log, ip, requireUser, sha256, randomHex });
+    if (res) return res;
+  }
 
   // ---- Everything below needs a logged-in user ----
   const user = await requireUser(req, env);

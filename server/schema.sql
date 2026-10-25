@@ -151,3 +151,36 @@ CREATE TABLE IF NOT EXISTS discord_links (
   attempts     INTEGER NOT NULL DEFAULT 0,
   verified_at  INTEGER
 );
+
+-- Live support chat (the help window on the site). Visitors who aren't logged in are known by the hash of a random key.
+CREATE TABLE IF NOT EXISTS support_threads (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER,
+  guest_hash   TEXT,
+  name         TEXT,
+  email        TEXT,
+  topic        TEXT,
+  status       TEXT NOT NULL DEFAULT 'open',
+  rating       INTEGER,
+  lang         TEXT,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+  last_from    TEXT,
+  last_preview TEXT,
+  user_unread  INTEGER NOT NULL DEFAULT 0,
+  admin_unread INTEGER NOT NULL DEFAULT 0,
+  page         TEXT,
+  user_agent   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_support_user ON support_threads(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_support_guest ON support_threads(guest_hash, updated_at);
+CREATE INDEX IF NOT EXISTS idx_support_status ON support_threads(status, updated_at);
+CREATE TABLE IF NOT EXISTS support_messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id  INTEGER NOT NULL,
+  sender     TEXT NOT NULL,
+  author     TEXT,
+  body       TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_msgs ON support_messages(thread_id, id);

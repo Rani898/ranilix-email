@@ -6,6 +6,7 @@ import { API_URL, BRAND, DEMO_MODE } from "../config.js";
 import { getAccounts, getSession } from "./session.js";
 import { loadMailbox, saveMailbox } from "./mailbox.js";
 import { formatBytes } from "./validation.js";
+import * as supportDemo from "./supportDemo.js";
 
 /** Error with a translation code (see errors.* in the i18n files). */
 export class ApiError extends Error {
@@ -31,8 +32,8 @@ export function checkFiles(files) {
   return null;
 }
 
-export async function request(path, { method = "GET", body, form, auth = false, raw = false } = {}) {
-  const headers = {};
+export async function request(path, { method = "GET", body, form, auth = false, raw = false, headers: extra = {} } = {}) {
+  const headers = { ...extra };
   if (body) headers["Content-Type"] = "application/json";
   if (auth) headers.Authorization = `Bearer ${getSession()?.token || ""}`;
   let res;
@@ -204,6 +205,30 @@ demo.pushKey = async () => null;
 demo.pushSubscribe = async () => ({ ok: true });
 demo.pushUnsubscribe = async () => ({ ok: true });
 
+// Help window chat. Visitors who aren't logged in get a key from the server the first time they write.
+const SUPPORT_KEY = "ranilix.support.key";
+const supportOpts = () => {
+  const headers = {};
+  try { const k = localStorage.getItem(SUPPORT_KEY); if (k) headers["X-Support-Key"] = k; } catch { /* ignore */ }
+  return { headers, auth: !!getSession()?.token };
+};
+live.supportInfo = () => request("/api/support/info");
+live.supportThreads = () => request("/api/support/threads", supportOpts());
+live.supportThread = (id, after = 0) => request(`/api/support/threads/${id}${after ? `?after=${after}` : ""}`, supportOpts());
+live.supportStart = async (payload) => {
+  const res = await request("/api/support/threads", { ...supportOpts(), method: "POST", body: payload });
+  if (res.guestKey) { try { localStorage.setItem(SUPPORT_KEY, res.guestKey); } catch { /* ignore */ } }
+  return res;
+};
+live.supportSend = (id, message) => request(`/api/support/threads/${id}/messages`, { ...supportOpts(), method: "POST", body: { message } });
+live.supportRate = (id, rating) => request(`/api/support/threads/${id}/rate`, { ...supportOpts(), method: "POST", body: { rating } });
+demo.supportInfo = supportDemo.info;
+demo.supportThreads = async () => supportDemo.userThreads(demoEmail());
+demo.supportThread = async (id) => supportDemo.userThread(demoEmail(), id);
+demo.supportStart = async (payload) => supportDemo.start(demoEmail(), payload);
+demo.supportSend = async (id, message) => supportDemo.send(demoEmail(), id, message);
+demo.supportRate = async (id, rating) => supportDemo.rate(demoEmail(), id, rating);
+
 const api = DEMO_MODE ? demo : live;
 
 export const {
@@ -213,4 +238,5 @@ export const {
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
   pushKey, pushSubscribe, pushUnsubscribe,
+  supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
 } = api;

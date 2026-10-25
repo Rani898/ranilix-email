@@ -99,6 +99,7 @@ export const LOG_CHANNELS = {
   security: { name: "🛡️│אבטחה",      color: 0xef4444, topic: "ניסיונות פריצה, נעילות, זיופים והצפות." },
   admin:    { name: "⚙️│ניהול",       color: 0xf59e0b, topic: "כל פעולה של מנהל בפאנל." },
   reports:  { name: "🚩│דיווחים",     color: 0xf97316, topic: "דיווחים מהאתר ומהדיסקורד." },
+  support:  { name: "💬│תמיכה",       color: 0x6366f1, topic: "שיחות בחלון העזרה באתר: הודעות חדשות ותשובות." },
   verify:   { name: "✅│אימותים",     color: 0x10b981, topic: "אימותים בדיסקורד (כפתור ו-/verify)." },
   bot:      { name: "🤖│פקודות-בוט",  color: 0x64748b, topic: "מי השתמש באיזו פקודה." },
   errors:   { name: "⚠️│שגיאות-שרת", color: 0xdc2626, topic: "שגיאות בשרת שצריך לבדוק." },

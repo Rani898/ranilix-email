@@ -11,6 +11,7 @@ import {
   KeyRound,
   Link2,
   LayoutDashboard,
+  LifeBuoy,
   Loader2,
   Mail,
   Mails,
@@ -37,12 +38,14 @@ import { getMe } from "../lib/api.js";
 import { adminApi } from "../lib/adminApi.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
+import SupportTab from "./AdminSupport.jsx";
 
 const DAY = 24 * 3600 * 1000;
 const TABS = [
   { id: "overview", icon: LayoutDashboard },
   { id: "users", icon: Users },
   { id: "broadcast", icon: Megaphone },
+  { id: "support", icon: LifeBuoy },
   { id: "reports", icon: Flag },
   { id: "settings", icon: Settings },
 ];
@@ -879,12 +882,14 @@ export default function Admin() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [openReports, setOpenReports] = useState(0);
+  const [supportUnread, setSupportUnread] = useState(0);
 
   useEffect(() => {
     if (!session) return;
     getMe().then((me) => {
       setAllowed(!!me.isAdmin);
       if (me.isAdmin) adminApi.reports("open").then((r) => setOpenReports(r.open)).catch(() => {});
+      if (me.isAdmin) adminApi.support("open").then((r) => setSupportUnread(r.unread)).catch(() => {});
     }).catch(() => setAllowed(false));
   }, [session?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -913,6 +918,7 @@ export default function Admin() {
         <button key={id} type="button" onClick={() => go(id)} aria-current={tab === id ? "page" : undefined}
           className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${tab === id ? "bg-white/12 text-white" : "text-white/65 hover:bg-white/6 hover:text-white"}`}>
           <Icon className="h-5 w-5" aria-hidden="true" /> <span className="flex-1 text-start">{t(`admin.nav.${id}`)}</span>
+          {id === "support" && supportUnread > 0 && <span className="rounded-full bg-rose-500 px-2 py-0.5 text-xs font-bold text-white">{supportUnread}</span>}
           {id === "reports" && openReports > 0 && <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-[#3b2800]">{openReports}</span>}
         </button>
       ))}
@@ -958,6 +964,7 @@ export default function Admin() {
           {tab === "users" && <UsersTab toast={toast} />}
           {tab === "broadcast" && <BroadcastTab toast={toast} />}
           {tab === "settings" && <SettingsTab toast={toast} />}
+          {tab === "support" && <SupportTab toast={toast} onCount={setSupportUnread} />}
           {tab === "reports" && <ReportsTab toast={toast} onCount={setOpenReports} />}
         </main>
       </div>

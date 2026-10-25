@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import Logo from "./Logo.jsx";
 import { BRAND } from "../config.js";
 import { useI18n } from "../lib/i18n.jsx";
+import { openSupport } from "./SupportWidget.jsx";
 
 export default function Footer() {
   const { t } = useI18n();
@@ -21,6 +22,7 @@ export default function Footer() {
             <li><a href={sec("#features")} className="hover:text-slate-900">{t("nav.features")}</a></li>
             <li><a href={sec("#security")} className="hover:text-slate-900">{t("footer.privacy")}</a></li>
             <li><a href={sec("#faq")} className="hover:text-slate-900">{t("nav.faq")}</a></li>
+            <li><button type="button" onClick={() => openSupport("help")} className="hover:text-slate-900">{t("support.menu")}</button></li>
           </ul>
         </div>
         <div>

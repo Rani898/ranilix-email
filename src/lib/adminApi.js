@@ -6,6 +6,7 @@ import { BRAND, DEMO_MODE } from "../config.js";
 import { ApiError, request } from "./api.js";
 import { getSession } from "./session.js";
 import { loadMailbox, saveMailbox } from "./mailbox.js";
+import * as supportDemo from "./supportDemo.js";
 
 /* ---------------- Live ---------------- */
 
@@ -22,6 +23,12 @@ const live = {
   reports: (status = "open") => request(`/api/admin/reports?status=${status}`, { auth: true }),
   setReportStatus: (id, status) => request(`/api/admin/reports/${id}`, { method: "PUT", body: { status }, auth: true }),
   deleteReport: (id) => request(`/api/admin/reports/${id}`, { method: "DELETE", auth: true }),
+  support: (status = "open") => request(`/api/admin/support?status=${status}`, { auth: true }),
+  supportThread: (id) => request(`/api/admin/support/${id}`, { auth: true }),
+  supportReply: (id, message) => request(`/api/admin/support/${id}/messages`, { method: "POST", body: { message }, auth: true }),
+  supportStatus: (id, status) => request(`/api/admin/support/${id}`, { method: "PUT", body: { status }, auth: true }),
+  supportDelete: (id) => request(`/api/admin/support/${id}`, { method: "DELETE", auth: true }),
+  supportOnline: (online) => request("/api/admin/support-settings", { method: "PUT", body: { online }, auth: true }),
   sendBroadcast: (subject, body, test) => request("/api/admin/broadcasts", { method: "POST", body: { subject, body, test }, auth: true }),
   settings: () => request("/api/admin/settings", { auth: true }),
   saveSettings: (patch) => request("/api/admin/settings", { method: "PUT", body: patch, auth: true }),
@@ -146,6 +153,12 @@ const demo = {
     return { open: all.filter((r) => r.status === "open").length, resolved: all.filter((r) => r.status === "resolved").length, reports: list };
   },
   async setReportStatus(id, status) { const s = load(); s.reports = demoReports().map((r) => (r.id === id ? { ...r, status } : r)); save(s); },
+  support: (status) => supportDemo.adminList(status),
+  supportThread: (id) => supportDemo.adminGet(id),
+  supportReply: (id, message) => supportDemo.adminReply(id, message, (getSession()?.email || "admin").split("@")[0]),
+  supportStatus: (id, status) => supportDemo.adminSetStatus(id, status),
+  supportDelete: (id) => supportDemo.adminDelete(id),
+  supportOnline: (online) => supportDemo.adminSetOnline(online),
   async deleteReport(id) { const s = load(); s.reports = demoReports().filter((r) => r.id !== id); save(s); },
   async sendBroadcast(subject, body, test) {
     await delay(500);
