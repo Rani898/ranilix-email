@@ -8,7 +8,7 @@ import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
-import { discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
+import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
 /* Config & helpers                                                    */
@@ -327,7 +327,7 @@ async function deleteUserCompletely(env, userId) {
   await cleanupFiles(env, atts.map((a) => a.kv_key));
 }
 
-async function adminRoute(req, env, admin, path, url) {
+async function adminRoute(req, env, admin, path, url, log) {
   // GET /api/admin/stats — numbers for the overview page
   if (path === "/api/admin/stats" && req.method === "GET") {
     const now = Date.now();
@@ -411,6 +411,7 @@ async function adminRoute(req, env, admin, path, url) {
       await env.DB.prepare("INSERT INTO user_meta (user_id, suspended) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET suspended = excluded.suspended")
         .bind(id, suspended ? 1 : 0).run();
       if (suspended) await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id).run();
+      log("admin", suspended ? "⛔ משתמש הושעה" : "✅ השעיה בוטלה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}` });
       return json({ ok: true });
     }
     // Set how many addresses this user's person/group may have.
@@ -421,6 +422,7 @@ async function adminRoute(req, env, admin, path, url) {
       const owner = await ownerOf(env, id);
       await env.DB.prepare("INSERT INTO account_limits (owner_id, max_accounts) VALUES (?, ?) ON CONFLICT(owner_id) DO UPDATE SET max_accounts = excluded.max_accounts")
         .bind(owner, n).run();
+      log("admin", "🔢 שינוי מגבלת כתובות", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}`, "מגבלה חדשה": n });
       return json({ ok: true, accounts: await groupInfo(env, owner) });
     }
     if (userMatch[2] === "password" && req.method === "POST") {
@@ -430,6 +432,7 @@ async function adminRoute(req, env, admin, path, url) {
       const salt = randomHex(16);
       await env.DB.prepare("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?").bind(await hashPassword(password, salt), salt, id).run();
       await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id).run();
+      log("admin", "🔑 מנהל איפס סיסמה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}` });
       return json({ ok: true });
     }
     if (!userMatch[2] && req.method === "DELETE") {
@@ -437,6 +440,7 @@ async function adminRoute(req, env, admin, path, url) {
       if (protectedUser) throw new HttpError(400, "Admins can't be deleted here.", "admin_protected");
       if (String(confirm || "").toLowerCase() !== target.username) throw new HttpError(400, "Type the username to confirm.", "confirm_mismatch");
       await deleteUserCompletely(env, id);
+      log("admin", "🗑️ מנהל מחק משתמש", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}` });
       return json({ ok: true });
     }
   }
@@ -445,7 +449,9 @@ async function adminRoute(req, env, admin, path, url) {
   if (path === "/api/admin/discord" && req.method === "GET") return json(await discordAdminStatus(env));
   if (path === "/api/admin/discord/register" && req.method === "POST") {
     try {
-      return json({ ok: true, commands: await discordRegister(env) });
+      const n = await discordRegister(env);
+      log("admin", "🤖 פקודות הבוט נרשמו", { "מנהל": admin.email, "פקודות": n });
+      return json({ ok: true, commands: n });
     } catch (e) {
       console.error("discord register", e.message);
       const code = e.message === "no_token" ? "discord_no_token" : e.message === "no_app_id" ? "discord_no_app" : "discord_failed";
@@ -470,10 +476,12 @@ async function adminRoute(req, env, admin, path, url) {
   if (repMatch && req.method === "PUT") {
     const { status } = await readJson(req);
     await env.DB.prepare("UPDATE reports SET status = ? WHERE id = ?").bind(status === "resolved" ? "resolved" : "open", Number(repMatch[1])).run();
+    log("admin", status === "resolved" ? "☑️ דיווח סומן כטופל" : "↩️ דיווח נפתח מחדש", { "מנהל": admin.email, "דיווח": `#${repMatch[1]}` });
     return json({ ok: true });
   }
   if (repMatch && req.method === "DELETE") {
     await env.DB.prepare("DELETE FROM reports WHERE id = ?").bind(Number(repMatch[1])).run();
+    log("admin", "🗑️ דיווח נמחק", { "מנהל": admin.email, "דיווח": `#${repMatch[1]}` });
     return json({ ok: true });
   }
 
@@ -514,6 +522,7 @@ async function adminRoute(req, env, admin, path, url) {
           env.DB.prepare("INSERT INTO broadcast_messages (broadcast_id, message_id) VALUES (?, ?)").bind(broadcastId, r.meta.last_row_id)));
       }
     }
+    log("admin", test ? "🧪 עדכון בדיקה נשלח" : "📢 עדכון נשלח לכל המשתמשים", { "מנהל": admin.email, "נושא": subj, "נמענים": recipients.length });
     if (!test) await discordNotify(env, "updates", { title: `📢 ${subj}`.slice(0, 256), description: text.slice(0, 3500), url: "https://rani898.github.io/ranilix-email/" });
     return json({ ok: true, recipients: recipients.length, test: !!test }, 201);
   }
@@ -530,6 +539,10 @@ async function adminRoute(req, env, admin, path, url) {
       if (typeof a.text === "string") await setSetting(env, "announcement_text", a.text.slice(0, 500));
       if (["info", "warning", "success"].includes(a.level)) await setSetting(env, "announcement_level", a.level);
     }
+    const changed = [typeof body.signupsOpen === "boolean" && `הרשמה: ${body.signupsOpen ? "פתוחה" : "סגורה"}`,
+      typeof body.outboundEnabled === "boolean" && `שליחה חיצונית: ${body.outboundEnabled ? "פעילה" : "כבויה"}`,
+      body.announcement && `באנר: ${body.announcement.enabled ? "מוצג" : "מוסתר"}`].filter(Boolean).join(" · ");
+    log("admin", "⚙️ הגדרות האתר שונו", { "מנהל": admin.email, "מה השתנה": changed });
     return json(await getSettings(env));
   }
 
@@ -540,10 +553,11 @@ async function adminRoute(req, env, admin, path, url) {
 /* Routes                                                              */
 /* ------------------------------------------------------------------ */
 
-async function route(req, env) {
+async function route(req, env, log) {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const ip = req.headers.get("CF-Connecting-IP") || "local";
+  const country = req.headers.get("CF-IPCountry") || "";
 
   if (path === "/" && req.method === "GET") return json({ ok: true, service: "ranilix-email-api", domain: env.MAIL_DOMAIN, files: !!env.FILES });
 
@@ -565,11 +579,15 @@ async function route(req, env) {
     const uErr = validateUsername(u);
     if (uErr) throw new HttpError(400, uErr);
     // Reserved names, and names listed as admins (so nobody can register an admin name that's free).
-    if (RESERVED.has(u) || isAdmin(env, u)) throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
+    if (RESERVED.has(u) || isAdmin(env, u)) {
+      if (isAdmin(env, u)) log("security", "🚫 ניסיון להירשם בשם של מנהל", { "שם": u, "מדינה": country });
+      throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
+    }
     const pErr = validatePassword(password);
     if (pErr) throw new HttpError(400, pErr);
     if (!(await getSettings(env)).signupsOpen) throw new HttpError(403, "New sign-ups are paused right now.", "signups_closed");
-    await rateLimit(env, `signup:${ip}`, 5, 3600 * 1000);
+    try { await rateLimit(env, `signup:${ip}`, 5, 3600 * 1000); }
+    catch (e) { log("security", "⏳ יותר מדי הרשמות מאותה כתובת IP", { "מדינה": country }); throw e; }
 
     // Creating another address from a browser that's already signed in: it joins that person's group.
     const existing = await firstValidUser(env, accountTokens);
@@ -577,7 +595,10 @@ async function route(req, env) {
     const creator = existing && await env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(existing).first();
     if (ownerId && !(creator && isAdmin(env, creator.username))) { // admins aren't limited
       const { used, max } = await groupInfo(env, ownerId);
-      if (used >= max) throw new HttpError(403, `You can have up to ${max} addresses.`, "account_limit", { max });
+      if (used >= max) {
+        log("accounts", "🔢 הגיע למגבלת הכתובות", { "מנסה ליצור": `${u}@${env.MAIL_DOMAIN}`, "מגבלה": max });
+        throw new HttpError(403, `You can have up to ${max} addresses.`, "account_limit", { max });
+      }
     }
 
     const salt = randomHex(16);
@@ -596,7 +617,7 @@ async function route(req, env) {
     await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
     await env.DB.prepare("INSERT OR IGNORE INTO user_meta (user_id, last_login_at) VALUES (?, ?)").bind(userId, Date.now()).run();
     const token = await createSession(env, userId, true);
-    await discordNotify(env, "logs", { title: "🆕 משתמש חדש", description: `\`${email}\`` });
+    log("signups", "🆕 משתמש חדש", { "כתובת": email, "מדינה": country, "כתובת נוספת של": creator ? `${creator.username}@${env.MAIL_DOMAIN}` : "" });
     return json({ token, email }, 201);
   }
 
@@ -608,6 +629,8 @@ async function route(req, env) {
     const failKey = `loginfail:${u.slice(0, 40)}`;
     const fails = await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE key = ?").bind(failKey).first();
     if (fails && Date.now() - fails.window_start < 15 * 60 * 1000 && fails.count >= 10) {
+      if (fails.count === 10) log("security", "🔒 כתובת ננעלה ל-15 דקות (10 סיסמאות שגויות)", { "כתובת": `${u}@${env.MAIL_DOMAIN}`, "מדינה": country });
+      await rateLimit(env, failKey, 1_000_000, 15 * 60 * 1000);
       throw new HttpError(429, "Too many attempts. Please wait a bit and try again.", "rate_limited");
     }
     const user = await env.DB.prepare("SELECT id, username, password_hash, salt FROM users WHERE username = ?").bind(u).first();
@@ -616,6 +639,8 @@ async function route(req, env) {
     const ok = user && typeof password === "string" && password.length <= 200 && safeEqual(await hashPassword(password, user.salt), user.password_hash);
     if (!ok) {
       await rateLimit(env, failKey, 1_000_000, 15 * 60 * 1000); // just counts failures
+      // Only name real addresses: people sometimes type their password into the address field.
+      log("logins", "❌ סיסמה שגויה", { "כתובת": user ? `${user.username}@${env.MAIL_DOMAIN}` : "(כתובת לא קיימת)", "מדינה": country });
       throw fail;
     }
     await env.DB.prepare("DELETE FROM rate_limits WHERE key = ?").bind(failKey).run();
@@ -623,13 +648,17 @@ async function route(req, env) {
     await env.DB.prepare("INSERT INTO user_meta (user_id, last_login_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET last_login_at = excluded.last_login_at")
       .bind(user.id, Date.now()).run();
     const token = await createSession(env, user.id, remember !== false);
+    log("logins", "🔑 התחברות", { "כתובת": `${user.username}@${env.MAIL_DOMAIN}`, "מדינה": country, "זכור אותי": remember !== false ? "כן" : "לא" });
     return json({ token, email: `${user.username}@${env.MAIL_DOMAIN}` });
   }
 
   if (path === "/api/logout" && req.method === "POST") {
     const auth = req.headers.get("Authorization") || "";
     if (auth.startsWith("Bearer ")) {
-      await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(auth.slice(7))).run();
+      const th = await sha256(auth.slice(7));
+      const who = await env.DB.prepare("SELECT u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?").bind(th).first();
+      await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(th).run();
+      if (who) log("logins", "🚪 התנתקות", { "כתובת": `${who.username}@${env.MAIL_DOMAIN}` });
     }
     return json({ ok: true });
   }
@@ -646,18 +675,18 @@ async function route(req, env) {
 
   // Discord slash commands (Discord signs every request; checked inside).
   if (path === "/api/discord/interactions" && req.method === "POST") {
-    return discordInteraction(req, env, { json, validateUsername, RESERVED, insertMessage, notifyUser, rateLimit });
+    return discordInteraction(req, env, { json, validateUsername, RESERVED, insertMessage, notifyUser, rateLimit, log, ctx: log.ctx });
   }
 
   if (path === "/api/push/key" && req.method === "GET") return json({ publicKey: await vapidPublicKey(env) });
 
   // Google redirects the browser here after "Connect Google" (no Ranilix token on this request).
-  if (path === "/api/google/callback") return googleRoute(req, env, path, url, null, { HttpError, json, htmlToText, randomHex });
+  if (path === "/api/google/callback") return googleRoute(req, env, path, url, null, { HttpError, json, htmlToText, randomHex, log });
 
   // ---- Everything below needs a logged-in user ----
   const user = await requireUser(req, env);
 
-  if (path.startsWith("/api/google/")) return googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex });
+  if (path.startsWith("/api/google/")) return googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex, log });
 
   if (path === "/api/me" && req.method === "GET") {
     const accounts = await groupInfo(env, await ownerOf(env, user.id));
@@ -678,11 +707,13 @@ async function route(req, env) {
     if (displayName !== undefined) {
       fields.display_name = cleanName(displayName);
       if (STAFF_NAME_RE.test(fields.display_name) && !isAdmin(env, user.username)) {
+        log("security", "🎭 ניסיון להשתמש בשם של הצוות", { "כתובת": user.email, "שם": fields.display_name });
         throw new HttpError(400, "That name is reserved for the Ranilix team.", "name_reserved");
       }
     }
     if (signature !== undefined) fields.signature = String(signature || "").slice(0, 1000);
     await upsertProfile(env, user.id, fields);
+    log("accounts", "✏️ עדכון פרופיל", { "כתובת": user.email, "שם": fields.display_name, "חתימה": fields.signature !== undefined ? "עודכנה" : "" });
     return json(await getProfile(env, user.id));
   }
   if (path === "/api/profile/avatar" && req.method === "PUT") {
@@ -690,10 +721,12 @@ async function route(req, env) {
     if (typeof dataUrl !== "string" || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new HttpError(400, "Choose a JPG, PNG or WebP picture.", "avatar_type");
     if (dataUrl.length > MAX_AVATAR_CHARS) throw new HttpError(400, "That picture is too big.", "avatar_big");
     await upsertProfile(env, user.id, { avatar: dataUrl });
+    log("accounts", "🖼️ תמונת פרופיל חדשה", { "כתובת": user.email });
     return json(await getProfile(env, user.id));
   }
   if (path === "/api/profile/avatar" && req.method === "DELETE") {
     await upsertProfile(env, user.id, { avatar: null });
+    log("accounts", "🖼️ תמונת פרופיל הוסרה", { "כתובת": user.email });
     return json(await getProfile(env, user.id));
   }
   if (path === "/api/account/password" && req.method === "POST") {
@@ -701,6 +734,7 @@ async function route(req, env) {
     await rateLimit(env, `pw:${user.id}`, 10, 3600 * 1000);
     const row = await env.DB.prepare("SELECT password_hash, salt FROM users WHERE id = ?").bind(user.id).first();
     if (typeof current !== "string" || !safeEqual(await hashPassword(current, row.salt), row.password_hash)) {
+      log("security", "🔑 סיסמה נוכחית שגויה בהחלפת סיסמה", { "כתובת": user.email });
       throw new HttpError(400, "Your current password isn't right.", "wrong_password");
     }
     const pErr = validatePassword(next);
@@ -710,6 +744,7 @@ async function route(req, env) {
     // Sign out every other device; keep this one.
     const mine = await sha256((req.headers.get("Authorization") || "").slice(7));
     await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, mine).run();
+    log("accounts", "🔐 סיסמה הוחלפה", { "כתובת": user.email, "מדינה": country });
     return json({ ok: true });
   }
   if (path === "/api/account/delete" && req.method === "POST") {
@@ -721,6 +756,7 @@ async function route(req, env) {
       throw new HttpError(400, "Your password isn't right.", "wrong_password");
     }
     await deleteUserCompletely(env, user.id);
+    log("accounts", "🗑️ משתמש מחק את החשבון שלו", { "כתובת": user.email });
     return json({ ok: true });
   }
 
@@ -733,7 +769,7 @@ async function route(req, env) {
     await env.DB.prepare("INSERT INTO reports (user_id, email, category, message, page, user_agent, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')")
       .bind(user.id, user.email, REPORT_CATEGORIES.has(category) ? category : "other", text.slice(0, 3000), String(page || "").slice(0, 200),
         (req.headers.get("User-Agent") || "").slice(0, 300), Date.now()).run();
-    await discordNotify(env, "logs", { title: "🚩 דיווח חדש מהאתר", description: text.slice(0, 1500), fields: [{ name: "מאת", value: user.email, inline: true }, { name: "סוג", value: REPORT_CATEGORIES.has(category) ? category : "other", inline: true }] });
+    log("reports", "🚩 דיווח חדש מהאתר", { "מאת": user.email, "סוג": REPORT_CATEGORIES.has(category) ? category : "other", "עמוד": String(page || "") }, text.slice(0, 1500));
     return json({ ok: true }, 201);
   }
 
@@ -741,7 +777,8 @@ async function route(req, env) {
   if (path === "/api/push/subscribe" && req.method === "POST") {
     const { endpoint } = await readJson(req);
     if (!validPushEndpoint(endpoint)) throw new HttpError(400, "Invalid request.");
-    await env.DB.prepare("INSERT OR IGNORE INTO push_subs (endpoint, user_id, created_at) VALUES (?, ?, ?)").bind(endpoint, user.id, Date.now()).run();
+    const pr = await env.DB.prepare("INSERT OR IGNORE INTO push_subs (endpoint, user_id, created_at) VALUES (?, ?, ?)").bind(endpoint, user.id, Date.now()).run();
+    if (pr.meta.changes) log("accounts", "🔔 הפעיל התראות במכשיר", { "כתובת": user.email, "שירות": new URL(endpoint).hostname });
     return json({ ok: true });
   }
   if (path === "/api/push/unsubscribe" && req.method === "POST") {
@@ -751,8 +788,11 @@ async function route(req, env) {
   }
 
   if (path.startsWith("/api/admin/")) {
-    if (!isAdmin(env, user.username)) throw new HttpError(404, "Not found.", "not_found"); // don't reveal the panel exists
-    return adminRoute(req, env, user, path, url);
+    if (!isAdmin(env, user.username)) {
+      log("security", "🕵️ משתמש רגיל ניסה לגשת לפאנל הניהול", { "כתובת": user.email, "נתיב": path, "מדינה": country });
+      throw new HttpError(404, "Not found.", "not_found"); // don't reveal the panel exists
+    }
+    return adminRoute(req, env, user, path, url, log);
   }
 
   if (path === "/api/messages" && req.method === "GET") {
@@ -844,6 +884,7 @@ async function route(req, env) {
         await rateLimit(env, `out:${user.id}`, OUTBOUND_PER_USER_DAY, DAY);
         await rateLimit(env, "out:global", OUTBOUND_GLOBAL_DAY, DAY);
       } catch {
+        log("security", "📮 הגיע למגבלת השליחה החיצונית היומית", { "כתובת": user.email });
         throw new HttpError(429, "Daily limit for sending to other providers reached.", "outbound_limit");
       }
     }
@@ -898,6 +939,7 @@ async function route(req, env) {
       await linkAttachments(env, id, inboxId, stored);
       await notifyUser(env, id);
     }
+    log("mail", "📤 מייל נשלח", { "מאת": user.email, "נמענים ב-Ranilix": internal.length, "נמענים חיצוניים": external.length, "קבצים": stored.length });
     return json({ ok: true }, 201);
   }
 
@@ -918,11 +960,12 @@ const SECURITY_HEADERS = {
 };
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const cors = corsHeaders(req, env);
+    const log = createLogger(env, ctx);
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     try {
-      const res = await route(req, env);
+      const res = await route(req, env, log);
       for (const [k, v] of Object.entries({ ...SECURITY_HEADERS, ...cors })) {
         if (k === "Cache-Control" && res.headers.has("Cache-Control")) continue;
         res.headers.set(k, v);
@@ -930,7 +973,10 @@ export default {
       return res;
     } catch (err) {
       const isHttp = err instanceof HttpError;
-      if (!isHttp) console.error(err);
+      if (!isHttp) {
+        console.error(err);
+        log("errors", "⚠️ שגיאת שרת", { "נתיב": `${req.method} ${new URL(req.url).pathname}` }, String(err?.stack || err).slice(0, 1500));
+      }
       return json(
         isHttp
           ? { error: err.message, code: err.code, params: err.params }
@@ -942,7 +988,8 @@ export default {
   },
 
   // Called by Cloudflare Email Routing (catch-all → this Worker)
-  async email(message, env) {
+  async email(message, env, ctx) {
+    const log = createLogger(env, ctx);
     const to = String(message.to || "").toLowerCase();
     const [local, domain] = to.split("@");
     if (domain !== env.MAIL_DOMAIN) return message.setReject("Unknown domain");
@@ -956,6 +1003,7 @@ export default {
       await rateLimit(env, `in:${user.id}`, 300, DAY);
       await rateLimit(env, `insender:${String(message.from || "").toLowerCase().slice(0, 120)}`, 60, 3600 * 1000);
     } catch {
+      log("security", "🌊 הצפת מיילים נחסמה", { "אל": to, "שולח (דומיין)": String(message.from || "").split("@")[1] || "?" });
       return message.setReject("Too many messages, try again later");
     }
 
@@ -980,6 +1028,7 @@ export default {
     let fromAddr = String(parsed.from?.address || message.from || "").slice(0, 200);
     let fromName = String(parsed.from?.name || "").replace(/[\r\n]/g, " ").slice(0, 120);
     if (fromAddr.toLowerCase().endsWith(`@${env.MAIL_DOMAIN}`)) {
+      log("security", "🎣 מייל מזויף בשם Ranilix סומן", { "אל": to, "התחזה ל": fromAddr, "שולח אמיתי (דומיין)": String(message.from || "").split("@")[1] || "?" });
       fromName = `⚠️ ${fromName || fromAddr} (unverified)`;
       fromAddr = String(message.from || "unknown").slice(0, 200);
     } else if (STAFF_NAME_RE.test(fromName) && /ranilix/i.test(fromName)) {
@@ -996,6 +1045,7 @@ export default {
     });
     await linkAttachments(env, user.id, messageId, kept);
     await notifyUser(env, user.id);
+    log("mail", "📥 מייל התקבל", { "אל": to, "שולח (דומיין)": (fromAddr.split("@")[1] || "?").slice(0, 80), "קבצים": kept.length });
   },
 
   // Daily cleanup of expired sessions and old rate-limit rows

@@ -543,6 +543,7 @@ export default {
       register: "Register the commands",
       registered: "{n} commands registered in Discord",
       invite: "Invite link",
+      logChannels: "{n} log channels",
       linked: "Linked to your server:",
       ch: { updates: "Updates channel", logs: "Logs channel", role: "Verified role" },
     },

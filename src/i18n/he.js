@@ -543,6 +543,7 @@ export default {
       register: "רישום הפקודות",
       registered: "{n} פקודות נרשמו בדיסקורד",
       invite: "קישור הזמנה",
+      logChannels: "{n} ערוצי לוגים",
       linked: "מחובר לשרת:",
       ch: { updates: "ערוץ עדכונים", logs: "ערוץ לוגים", role: "תפקיד מאומתים" },
     },

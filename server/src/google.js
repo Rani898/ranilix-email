@@ -82,7 +82,7 @@ function summary(m) {
  * Handles /api/google/*. `user` is null for the OAuth callback (Google redirects the browser there
  * without our session token; the one-time `state` ties it to the user).
  */
-export async function googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex }) {
+export async function googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex, log = () => {} }) {
   const fail = (status, message, code) => { throw new HttpError(status, message, code); };
 
   async function accessToken(userId) {
@@ -154,6 +154,8 @@ export async function googleRoute(req, env, path, url, user, { HttpError, json, 
     await env.DB.prepare(
       "INSERT OR REPLACE INTO google_accounts (user_id, google_email, refresh_enc, access_enc, access_expires, connected_at) VALUES (?, ?, ?, ?, ?, ?)"
     ).bind(row.user_id, info.email || "", refreshEnc, await seal(env, tok.access_token), Date.now() + (tok.expires_in || 3600) * 1000, Date.now()).run();
+    const owner = await env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(row.user_id).first();
+    log("accounts", "🔗 חיבור Gmail", { "כתובת": owner ? `${owner.username}@${env.MAIL_DOMAIN}` : "?", "חשבון Google": info.email || "" });
     return back("connected");
   }
 
@@ -196,6 +198,7 @@ export async function googleRoute(req, env, path, url, user, { HttpError, json, 
         await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(await open(env, row.refresh_enc))}`, { method: "POST" });
       } catch { /* still forget it locally */ }
       await env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(user.id).run();
+      log("accounts", "✂️ ניתוק Gmail", { "כתובת": user.email });
     }
     return json({ ok: true });
   }

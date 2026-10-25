@@ -83,6 +83,51 @@ export async function discordNotify(env, which, embed) {
   } catch (e) { console.error("discordNotify", which, e.message); }
 }
 
+/* ---------- Log channels ---------- */
+
+// One Discord channel per kind of log. /setup creates the ones that are missing.
+export const LOG_CHANNELS = {
+  signups:  { name: "🆕│הרשמות",      color: 0x22c55e, topic: "כל משתמש חדש שנרשם לאתר." },
+  logins:   { name: "🔑│התחברויות",   color: 0x3b82f6, topic: "התחברויות והתנתקויות." },
+  accounts: { name: "👤│חשבונות",     color: 0x8b5cf6, topic: "שינוי סיסמה, שם, תמונה, מחיקת חשבון, חיבור Gmail." },
+  mail:     { name: "📨│מיילים",      color: 0x0ea5e9, topic: "שליחת מיילים (כמה ולאן, בלי תוכן)." },
+  security: { name: "🛡️│אבטחה",      color: 0xef4444, topic: "ניסיונות פריצה, נעילות, זיופים והצפות." },
+  admin:    { name: "⚙️│ניהול",       color: 0xf59e0b, topic: "כל פעולה של מנהל בפאנל." },
+  reports:  { name: "🚩│דיווחים",     color: 0xf97316, topic: "דיווחים מהאתר ומהדיסקורד." },
+  verify:   { name: "✅│אימותים",     color: 0x10b981, topic: "אימותים בדיסקורד (כפתור ו-/verify)." },
+  bot:      { name: "🤖│פקודות-בוט",  color: 0x64748b, topic: "מי השתמש באיזו פקודה." },
+  errors:   { name: "⚠️│שגיאות-שרת", color: 0xdc2626, topic: "שגיאות בשרת שצריך לבדוק." },
+};
+const LOG_CATEGORY = "📊 לוגים";
+
+/**
+ * Returns log(kind, title, fields?, description?) for one request. Posts in the background (ctx.waitUntil)
+ * so a slow Discord never slows the site. Falls back to the general logs channel. Never throws.
+ */
+export function createLogger(env, ctx) {
+  let settingsPromise;
+  const log = function log(kind, title, fields = {}, description) {
+    if (!env.DISCORD_BOT_TOKEN) return;
+    const work = (async () => {
+      settingsPromise ||= discordSettings(env);
+      const s = await settingsPromise;
+      const channel = s[`log_${kind}`] || s.logs;
+      if (!channel) return;
+      const def = LOG_CHANNELS[kind] || {};
+      const list = Object.entries(fields).filter(([, v]) => v !== undefined && v !== null && v !== "")
+        .map(([name, value]) => ({ name, value: String(value).slice(0, 1000), inline: String(value).length < 40 }));
+      await rest(env, "POST", `/channels/${channel}/messages`, {
+        embeds: [{ color: def.color || COLOR, title: String(title).slice(0, 256), description: description ? String(description).slice(0, 3000) : undefined,
+          fields: list.slice(0, 20), timestamp: new Date().toISOString() }],
+        allowed_mentions: { parse: [] },
+      });
+    })().catch((e) => console.error("log", kind, e.message));
+    if (ctx?.waitUntil) ctx.waitUntil(work); else return work;
+  };
+  log.ctx = ctx;
+  return log;
+}
+
 /* ---------- Signature check ---------- */
 
 const hexBytes = (hex) => new Uint8Array((hex.match(/../g) || []).map((h) => parseInt(h, 16)));
@@ -126,6 +171,8 @@ export async function discordInteraction(req, env, h) {
   const user = i.member?.user || i.user || {};
   const name = i.data?.name;
   const options = i.data?.options || [];
+  const sub = options[0]?.type === 1 ? ` ${options[0].name}` : "";
+  h.log?.("bot", `🤖 /${name}${sub}`, { "משתמש": `<@${user.id}>`, "ערוץ": i.channel_id ? `<#${i.channel_id}>` : "" });
   const domain = env.MAIL_DOMAIN;
 
   try {
@@ -183,7 +230,7 @@ export async function discordInteraction(req, env, h) {
       const who = `discord:${user.username || user.id}`;
       await env.DB.prepare("INSERT INTO reports (user_id, email, category, message, page, user_agent, created_at, status) VALUES (NULL, ?, ?, ?, 'discord', 'Discord', ?, 'open')")
         .bind(who, category, message, Date.now()).run();
-      await discordNotify(env, "logs", { title: "🚩 דיווח חדש מדיסקורד", description: message, fields: [{ name: "מאת", value: `<@${user.id}>`, inline: true }, { name: "סוג", value: category, inline: true }] });
+      h.log?.("reports", "🚩 דיווח חדש מדיסקורד", { "מאת": `<@${user.id}>`, "סוג": category }, message);
       return reply(h.json, "✅ תודה! הדיווח הגיע לצוות.");
     }
 
@@ -220,6 +267,7 @@ export async function discordInteraction(req, env, h) {
         const code = String(opt(sub.options, "code") || "").trim();
         if ((await sha256(`${user.id}:${code}`)) !== row.code_hash) {
           await env.DB.prepare("UPDATE discord_links SET attempts = attempts + 1 WHERE discord_id = ?").bind(user.id).run();
+          if (row.attempts >= 2) h.log?.("security", "🔢 קוד אימות שגוי בדיסקורד", { "משתמש": `<@${user.id}>`, "ניסיון": row.attempts + 1 });
           return reply(h.json, `❌ הקוד לא נכון. נשארו ${Math.max(0, 4 - row.attempts)} ניסיונות.`);
         }
         await env.DB.prepare("UPDATE discord_links SET code_hash = NULL, verified_at = ? WHERE discord_id = ?").bind(Date.now(), user.id).run();
@@ -230,7 +278,7 @@ export async function discordInteraction(req, env, h) {
           catch { roleNote = " (לא הצלחנו לתת את התפקיד. בקשו מהצוות.)"; }
         }
         const u = await env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(row.user_id).first();
-        await discordNotify(env, "logs", { title: "✅ אימות חדש", description: `<@${user.id}> ← \`${u?.username || "?"}@${domain}\`` });
+        h.log?.("verify", "📧 אימות כתובת Ranilix", { "משתמש": `<@${user.id}>`, "כתובת": `${u?.username || "?"}@${domain}` });
         return reply(h.json, `🎉 אומת!${roleNote}`);
       }
     }
@@ -296,25 +344,14 @@ export async function discordInteraction(req, env, h) {
 
     if (name === "setup") {
       if (!isAdminMember(i)) return reply(h.json, "רק למנהלים.");
-      if (!env.DISCORD_BOT_TOKEN) return reply(h.json, "❌ חסר טוקן של הבוט בשרת. הריצו את setup.bat והדביקו אותו בשלב של Discord.");
-      const [channels, roles] = await Promise.all([rest(env, "GET", `/guilds/${i.guild_id}/channels`), rest(env, "GET", `/guilds/${i.guild_id}/roles`)]);
-      const text = channels.filter((c) => c.type === 0 || c.type === 5);
-      const updates = text.find((c) => c.name.includes("עדכונים")) || text.find((c) => /update|announce/i.test(c.name));
-      const logs = text.find((c) => c.name.includes("לוגים")) || text.find((c) => /log/i.test(c.name));
-      const role = roles.find((r) => r.name.includes("משתמש Ranilix")) || roles.find((r) => /verified/i.test(r.name));
-      await saveSetting(env, "guild", i.guild_id);
-      await saveSetting(env, "updates", updates?.id || "");
-      await saveSetting(env, "logs", logs?.id || "");
-      await saveSetting(env, "role", role?.id || "");
-      const line = (label, x, kind) => `${x ? "✅" : "⚠️"} ${label}: ${x ? (kind === "role" ? `<@&${x.id}>` : `<#${x.id}>`) : "לא נמצא"}`;
-      return reply(h.json, [
-        "🔗 הבוט חובר לשרת!",
-        line("עדכונים מהאתר", updates),
-        line("לוגים לצוות", logs),
-        line("תפקיד למאומתים", role, "role"),
-        "",
-        "אם משהו לא נמצא, צרו אותו (או שנו את השם) והריצו שוב `/setup`. את התפקיד של הבוט צריך לגרור מעל התפקיד 📧 משתמש Ranilix.",
-      ].join("\n"));
+      if (!env.DISCORD_BOT_TOKEN) return reply(h.json, "❌ חסר טוקן של הבוט בשרת.");
+      // Creating ~10 channels can take longer than Discord's 3 seconds: answer "thinking…" now, finish in the background.
+      const finish = runSetup(env, i).then((text) => followUp(env, i, text)).catch((e) => {
+        console.error("setup", e.message);
+        return followUp(env, i, "😕 ההגדרה נכשלה. ודאו שלבוט יש הרשאת מנהל (Administrator) ונסו שוב.");
+      });
+      if (h.ctx?.waitUntil) h.ctx.waitUntil(finish); else await finish;
+      return h.json({ type: 5, data: { flags: EPHEMERAL } });
     }
   } catch (e) {
     if (e?.code === "rate_limited") return reply(h.json, "⏳ יותר מדי ניסיונות. נסו שוב בעוד שעה.");
@@ -326,6 +363,56 @@ export async function discordInteraction(req, env, h) {
 
 const MEMBER_ROLE = "✅ מאומת";
 
+/** Edits the "thinking…" reply of a deferred command. */
+async function followUp(env, i, content) {
+  await fetch(`${API}/webhooks/${env.DISCORD_APP_ID}/${i.token}/messages/@original`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "User-Agent": `DiscordBot (${SITE}, 1.0)` },
+    body: JSON.stringify({ content: content.slice(0, 1900), allowed_mentions: { parse: [] } }),
+  });
+}
+
+/** Finds the updates channel and verified role, and creates the logs category with one channel per log kind. */
+async function runSetup(env, i) {
+  const g = i.guild_id;
+  let [channels, roles] = await Promise.all([rest(env, "GET", `/guilds/${g}/channels`), rest(env, "GET", `/guilds/${g}/roles`)]);
+  const text = channels.filter((c) => c.type === 0 || c.type === 5);
+  const updates = text.find((c) => c.name.includes("עדכונים")) || text.find((c) => /update|announce/i.test(c.name));
+  const general = text.find((c) => c.name.includes("לוגים") && !Object.values(LOG_CHANNELS).some((d) => d.name === c.name)) || text.find((c) => /log/i.test(c.name));
+  const role = roles.find((r) => r.name.includes("משתמש Ranilix")) || roles.find((r) => /verified/i.test(r.name));
+  const staffRoles = roles.filter((r) => /צוות|מנהל|staff|mod/i.test(r.name) && !r.managed);
+
+  // Hidden category: nobody sees it except admins and staff roles.
+  const VIEW = String(1 << 10);
+  const overwrites = [{ id: g, type: 0, deny: VIEW }, ...staffRoles.map((r) => ({ id: r.id, type: 0, allow: VIEW }))];
+  let category = channels.find((c) => c.type === 4 && c.name === LOG_CATEGORY);
+  if (!category) category = await rest(env, "POST", `/guilds/${g}/channels`, { name: LOG_CATEGORY, type: 4, permission_overwrites: overwrites });
+
+  const made = [];
+  for (const [kind, def] of Object.entries(LOG_CHANNELS)) {
+    let ch = channels.find((c) => c.type === 0 && c.name === def.name);
+    if (!ch) {
+      ch = await rest(env, "POST", `/guilds/${g}/channels`, { name: def.name, type: 0, parent_id: category.id, topic: def.topic, permission_overwrites: overwrites });
+      made.push(def.name);
+    }
+    await saveSetting(env, `log_${kind}`, ch.id);
+  }
+  await saveSetting(env, "guild", g);
+  await saveSetting(env, "updates", updates?.id || "");
+  await saveSetting(env, "logs", general?.id || "");
+  await saveSetting(env, "role", role?.id || "");
+
+  const line = (label, x, kind) => `${x ? "✅" : "⚠️"} ${label}: ${x ? (kind === "role" ? `<@&${x.id}>` : `<#${x.id}>`) : "לא נמצא"}`;
+  return [
+    "🔗 הבוט חובר לשרת!",
+    line("עדכונים מהאתר", updates),
+    line("תפקיד למאומתים", role, "role"),
+    `✅ קטגוריית ${LOG_CATEGORY}: ${Object.keys(LOG_CHANNELS).length} ערוצי לוגים${made.length ? ` (נוצרו עכשיו ${made.length})` : ""}`,
+    "",
+    "אם משהו לא נמצא, צרו אותו (או שנו את השם) והריצו שוב `/setup`.",
+  ].join("\n");
+}
+
 async function verifyButton(env, i, h) {
   const user = i.member?.user || {};
   try {
@@ -333,6 +420,7 @@ async function verifyButton(env, i, h) {
     if (!roleId) return reply(h.json, "האימות עוד לא הוגדר. בקשו מהצוות להריץ /verify-panel.");
     if ((i.member?.roles || []).includes(roleId)) return reply(h.json, "✅ כבר אימתתם. ברוכים הבאים!");
     await rest(env, "PUT", `/guilds/${i.guild_id}/members/${user.id}/roles/${roleId}`);
+    h.log?.("verify", "✅ אימות בכפתור", { "משתמש": `<@${user.id}>` });
     return reply(h.json, "🎉 אומתתם! עכשיו אתם רואים את כל הערוצים. תהנו!\nיש לכם כתובת ב-Ranilix? כתבו `/verify start` כדי לקבל גם את התפקיד 📧 משתמש Ranilix.");
   } catch (e) {
     console.error("verify button", e.message);
@@ -349,7 +437,8 @@ export async function discordAdminStatus(env) {
     hasPublicKey: !!env.DISCORD_PUBLIC_KEY,
     hasToken: !!env.DISCORD_BOT_TOKEN,
     linked: !!s.guild,
-    channels: { updates: !!s.updates, logs: !!s.logs, role: !!s.role },
+    channels: { updates: !!s.updates, logs: Object.keys(LOG_CHANNELS).some((k) => s[`log_${k}`]) || !!s.logs, role: !!s.role },
+    logChannels: Object.keys(LOG_CHANNELS).filter((k) => s[`log_${k}`]).length,
     inviteUrl: env.DISCORD_APP_ID ? `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_APP_ID}&scope=bot+applications.commands&permissions=8` : "",
   };
 }

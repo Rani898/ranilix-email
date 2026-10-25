@@ -723,7 +723,7 @@ function DiscordCard({ toast }) {
           </div>
           {d.linked && (
             <p className="mt-4 text-sm text-slate-600">
-              {t("admin.discord.linked")} {["updates", "logs", "role"].map((k) => <span key={k} className={`ms-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${d.channels?.[k] ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{t(`admin.discord.ch.${k}`)}</span>)}
+              {t("admin.discord.linked")} {d.logChannels > 0 && <span className="ms-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">{t("admin.discord.logChannels", { n: d.logChannels })}</span>} {["updates", "role"].map((k) => <span key={k} className={`ms-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${d.channels?.[k] ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{t(`admin.discord.ch.${k}`)}</span>)}
             </p>
           )}
         </>
