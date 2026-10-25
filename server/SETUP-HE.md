@@ -96,6 +96,24 @@ npx.cmd wrangler deploy
 - שם כתובת חדש חייב לכלול לפחות 4 אותיות באנגלית או מספרים.
 - **חשוב:** הירשם עם השם `rani` מיד אחרי העלאת השרת, לפני שמישהו אחר יתפוס אותו.
 
+## העלאה אוטומטית של השרת מ-GitHub (במקום setup.bat)
+מעכשיו כל שינוי בתיקייה `server` עולה לבד ל-Cloudflare. צריך להגדיר פעם אחת:
+
+**1. יצירת מפתח ב-Cloudflare**
+1. https://dash.cloudflare.com/profile/api-tokens ← **Create Token**.
+2. ליד **Edit Cloudflare Workers** ← **Use template**.
+3. ב-Permissions ← **+ Add more** ← `Account` · `D1` · `Edit`.
+4. ב-Account Resources: החשבון שלך. ב-Zone Resources: **Specific zone ← ranilix.com**.
+5. **Continue to summary ← Create Token ← Copy**. (לא שולחים לאף אחד.)
+
+**2. שמירת המפתח ב-GitHub**
+1. https://github.com/Rani898/ranilix-email/settings/secrets/actions ← **New repository secret**.
+2. Name: `CLOUDFLARE_API_TOKEN` · Secret: המפתח שהעתקת ← **Add secret**.
+3. (רשות) אפשר להוסיף כאן גם `DISCORD_BOT_TOKEN`, `RESEND_API_KEY`, `GOOGLE_CLIENT_SECRET`: הם יועתקו לשרת בכל העלאה.
+
+**3. הפעלה ראשונה**
+https://github.com/Rani898/ranilix-email/actions ← **Deploy server (Cloudflare Worker)** ← **Run workflow**. אחרי דקה-שתיים יופיע וי ירוק.
+
 ## עדכון שרת שכבר הועלה
 אם כבר העלית את השרת לפני כן, אחרי כל עדכון מספיק:
 ```powershell
