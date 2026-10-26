@@ -8,14 +8,23 @@ const NAME_MAX = 120;
 const DEFAULT_QUOTA_MB = 100;
 
 /** Which storage is in use and how big it can get (free tiers). */
-export function driveBackend(env) {
-  if (env.DRIVE) return { kind: "r2", capacity: 10 * GB, maxFile: 95 * MB };
+// R2 has no hard size: the admin picks a ceiling for the whole site (the bill can't go past it).
+// 10 GB is free; above that R2 costs about $0.015 per GB a month.
+export const DEFAULT_CAP_GB = 500;
+export const MAX_CAP_GB = 2000;
+export async function driveCapGb(env) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'drive_cap_gb'").first();
+  const n = Number(row?.value);
+  return Number.isFinite(n) && n >= 1 && n <= MAX_CAP_GB && row ? n : DEFAULT_CAP_GB;
+}
+export async function driveBackend(env) {
+  if (env.DRIVE) return { kind: "r2", capacity: (await driveCapGb(env)) * GB, maxFile: 95 * MB };
   if (env.FILES) return { kind: "kv", capacity: 1 * GB, maxFile: 24 * MB };
   return { kind: "none", capacity: 0, maxFile: 0 };
 }
 
 /** The highest quota an admin can give one person: everything the storage holds. */
-export const maxQuotaBytes = (env) => driveBackend(env).capacity;
+export const maxQuotaBytes = async (env) => (await driveBackend(env)).capacity;
 
 async function put(env, key, body, mime) {
   if (env.DRIVE) return env.DRIVE.put(key, body, { httpMetadata: { contentType: mime } });
@@ -51,7 +60,7 @@ export async function quotaOf(env, userId, isAdminUser = false) {
   if (isAdminUser) return maxQuotaBytes(env);
   const row = await env.DB.prepare("SELECT quota_bytes FROM drive_quota WHERE user_id = ?").bind(userId).first();
   const q = row ? row.quota_bytes : (await driveDefaultMb(env)) * MB;
-  return Math.min(q, maxQuotaBytes(env));
+  return Math.min(q, await maxQuotaBytes(env));
 }
 export async function usedBy(env, userId) {
   return (await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM drive_files WHERE user_id = ? AND is_folder = 0").bind(userId).first()).n;
@@ -162,7 +171,7 @@ export async function driveShareRoute(req, env, path, h) {
 export async function driveRoute(req, env, path, url, user, h) {
   const { HttpError, json, readJson, log } = h;
   if (!path.startsWith("/api/drive")) return null;
-  const backend = driveBackend(env);
+  const backend = await driveBackend(env);
   if (backend.kind === "none") throw new HttpError(503, "File storage isn't set up on the server yet.", "drive_off");
   const usage = async () => ({ used: await usedBy(env, user.id), quota: await quotaOf(env, user.id, !!h.admin), maxFile: backend.maxFile, backend: backend.kind });
 

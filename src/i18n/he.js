@@ -597,6 +597,8 @@ export default {
     fillBoth: "הזינו אימייל וסיסמה.",
   },
   errors: {
+    drive_cap_kv: "קודם צריך לחבר את R2.",
+    drive_cap_range: "בחרו בין 1 ל-{max} GB.",
     drive_link_gone: "הקישור הזה כבר לא עובד.",
     drive_off: "האחסון עוד לא מוגדר בשרת.",
     drive_name: "צריך לתת שם.",
@@ -1001,8 +1003,12 @@ export default {
     settings: {
       driveTitle: "דרייב",
       driveKv: "האחסון עכשיו: Cloudflare KV. עד {cap} לכל האתר ביחד, ועד {file}MB לקובץ. חיבור R2 יגדיל ל-10GB (ראו SETUP-HE.md).",
-      driveR2: "האחסון עכשיו: Cloudflare R2. עד {cap} חינם לכל האתר ביחד, ועד {file}MB לקובץ.",
+      driveR2: "האחסון עכשיו: Cloudflare R2. התקרה של כל האתר: {cap}, ועד {file}MB לקובץ. 10GB הראשונים חינם.",
       driveUsage: "כמה מקום תפוס בכל האתר",
+      driveCap: "תקרת אחסון לכל האתר",
+      driveCapFree: "עד 10GB זה חינם לגמרי.",
+      driveCapCost: "אם כל המקום יתמלא עד הסוף, החיוב ב-Cloudflare יהיה בערך ${cost} לחודש (10GB הראשונים חינם). כשהתקרה מתמלאת, האתר לא נותן להעלות עוד.",
+      driveCapRange: "בחרו בין 1 ל-{max} GB.",
       driveDefault: "נפח התחלתי לכל משתמש",
       driveDefaultHint: "משתמשים שלא קבעתם להם נפח מקבלים את זה. מקסימום {max}MB. נפח אישי קובעים בטבלת המשתמשים.",
       tempTitle: "כתובות זמניות",

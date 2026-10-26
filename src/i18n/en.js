@@ -597,6 +597,8 @@ export default {
     fillBoth: "Please enter your email and password.",
   },
   errors: {
+    drive_cap_kv: "Connect R2 first.",
+    drive_cap_range: "Pick between 1 and {max} GB.",
     drive_link_gone: "This link doesn't work anymore.",
     drive_off: "File storage isn't set up on the server yet.",
     drive_name: "It needs a name.",
@@ -1001,8 +1003,12 @@ export default {
     settings: {
       driveTitle: "Drive",
       driveKv: "Storage now: Cloudflare KV. Up to {cap} for the whole site together, and {file}MB per file. Connecting R2 raises it to 10GB (see SETUP-HE.md).",
-      driveR2: "Storage now: Cloudflare R2. Up to {cap} free for the whole site together, and {file}MB per file.",
+      driveR2: "Storage now: Cloudflare R2. Ceiling for the whole site: {cap}, and {file}MB per file. The first 10GB are free.",
       driveUsage: "Space used across the site",
+      driveCap: "Storage ceiling for the whole site",
+      driveCapFree: "Up to 10GB is completely free.",
+      driveCapCost: "If all of it fills up, the Cloudflare bill would be about ${cost} a month (the first 10GB are free). Once the ceiling is full, the site stops new uploads.",
+      driveCapRange: "Pick between 1 and {max} GB.",
       driveDefault: "Starting space for each user",
       driveDefaultHint: "Users without their own size get this. Up to {max}MB. Set a personal size in the users table.",
       tempTitle: "Temporary addresses",

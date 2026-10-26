@@ -990,6 +990,7 @@ function DiscordCard({ toast }) {
 function DriveSettingsCard({ s, save, saving }) {
   const { t } = useI18n();
   const [def, setDef] = useState(String(s.driveDefaultMb ?? 100));
+  const [cap, setCap] = useState(String(Math.round((s.drive?.capacityMb || 1024) / 1024)));
   const [usage, setUsage] = useState(null);
   useEffect(() => { adminApi.stats().then((st) => setUsage({ used: st.driveUsed || 0, capacity: st.driveCapacity || 0 })).catch(() => {}); }, []);
   const d = s.drive || { backend: "kv", capacityMb: 1024, maxFileMb: 24 };
@@ -1006,6 +1007,28 @@ function DriveSettingsCard({ s, save, saving }) {
           <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${pct > 90 ? "bg-rose-500" : "bg-brand-600"}`} style={{ width: `${Math.max(pct, usage.used ? 1 : 0)}%` }} /></div>
         </div>
       )}
+      {d.backend === "r2" && (() => {
+        const g = Number(cap);
+        const okCap = Number.isInteger(g) && g >= 1 && g <= (d.maxCapGb || 2000);
+        const cost = Math.max(0, g - 10) * 0.015;
+        return (
+          <div className="mt-5 rounded-xl border border-slate-200 p-4">
+            <label htmlFor="drive-cap" className="block text-sm font-semibold text-slate-800">{t("admin.settings.driveCap")}</label>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <input id="drive-cap" type="number" min="1" max={d.maxCapGb || 2000} dir="ltr" value={cap} onChange={(e) => setCap(e.target.value)}
+                className="w-32 rounded-xl border border-slate-300 bg-surface px-3 py-2.5 text-center font-bold tabular-nums text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
+              <span className="text-sm font-semibold text-slate-600">GB</span>
+              {[10, 100, 500, 1000].map((p) => (
+                <button key={p} type="button" onClick={() => setCap(String(p))} className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${g === p ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 text-slate-700 hover:border-brand-400"}`}><bdi dir="ltr">{p} GB</bdi></button>
+              ))}
+              <Button onClick={() => save({ driveCapGb: g })} disabled={saving || !okCap}>{t("admin.settings.save")}</Button>
+            </div>
+            <p className={`mt-2 text-sm ${okCap ? "text-slate-600" : "text-rose-600"}`}>
+              {okCap ? (g <= 10 ? t("admin.settings.driveCapFree") : t("admin.settings.driveCapCost", { cost: cost.toFixed(2) })) : t("admin.settings.driveCapRange", { max: d.maxCapGb || 2000 })}
+            </p>
+          </div>
+        );
+      })()}
       <label htmlFor="drive-default" className="mt-5 block text-sm font-semibold text-slate-800">{t("admin.settings.driveDefault")}</label>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         <input id="drive-default" type="number" min="0" max={d.capacityMb} dir="ltr" value={def} onChange={(e) => setDef(e.target.value)}
