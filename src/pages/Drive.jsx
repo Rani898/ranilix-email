@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, Square, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
+  ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, MoreVertical, Square, CheckSquare, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
   Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Pencil, Search, Trash2, X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
@@ -79,7 +79,8 @@ function NameDialog({ title, initial = "", action, onSubmit, onClose }) {
   );
 }
 
-function MoveDialog({ item, onMove, onClose }) {
+function MoveDialog({ items, onMove, onClose }) {
+  const item = items[0];
   const { t } = useI18n();
   const errorText = useErrorText();
   const [folders, setFolders] = useState(null);
@@ -95,14 +96,14 @@ function MoveDialog({ item, onMove, onClose }) {
     const out = [];
     const walk = (parent, depth) => {
       for (const f of (kids.get(parent) || []).sort((a, b) => a.name.localeCompare(b.name))) {
-        if (item.folder && f.id === item.id) continue;
+        if (items.some((it) => it.folder && it.id === f.id)) continue;
         out.push({ ...f, depth });
         walk(f.id, depth + 1);
       }
     };
     walk(null, 1);
     return out;
-  }, [folders, item]);
+  }, [folders, items]);
   const run = async () => {
     setBusy(true);
     try { await onMove(target); } catch (e) { setError(errorText(e)); setBusy(false); }
@@ -116,7 +117,7 @@ function MoveDialog({ item, onMove, onClose }) {
     </button>
   );
   return (
-    <Modal title={t("drive.moveTitle", { name: item.name })} onClose={onClose}
+    <Modal title={items.length > 1 ? t("drive.moveManyTitle", { n: items.length }) : t("drive.moveTitle", { name: item.name })} onClose={onClose}
       footer={<><Button variant="ghost" onClick={onClose}>{t("drive.cancel")}</Button><Button onClick={run} disabled={busy || !folders}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("drive.moveHere")}</Button></>}>
       {!folders ? <div className="grid place-items-center py-8 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div> : (
         <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200 p-1">
@@ -232,6 +233,9 @@ function Drive({ email }) {
   const [dragging, setDragging] = useState(false);
   const [view, setViewState] = useState(readView);
   const [thumbs, setThumbs] = useState({}); // id -> short-lived url for the gallery
+  const [selected, setSelected] = useState(() => new Set());
+  const toggleSelect = (id) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  useEffect(() => { setSelected(new Set()); }, [folder, view]);
   const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } };
   const [toast, setToast] = useState("");
   const fileInput = useRef(null);
@@ -418,12 +422,29 @@ function Drive({ email }) {
             </div>
           ) : (
             view !== "list" ? (
+              <>
+              {selected.size > 0 && (() => {
+                const items = visible.filter((i) => selected.has(i.id));
+                const files = items.filter((i) => !i.folder);
+                return (
+                  <div className="sticky top-16 z-10 flex flex-wrap items-center gap-2 border-b border-brand-200 bg-brand-50 px-4 py-2.5">
+                    <button type="button" onClick={() => setSelected(new Set())} className="grid h-8 w-8 place-items-center rounded-full text-brand-700 hover:bg-brand-100" aria-label={t("drive.clearSel")}><X className="h-4 w-4" /></button>
+                    <span className="me-auto text-sm font-bold text-brand-800">{t("drive.selectedN", { n: items.length })}</span>
+                    {items.length < visible.length && <Button variant="ghost" onClick={() => setSelected(new Set(visible.map((i) => i.id)))}><CheckSquare className="h-4 w-4" /> {t("drive.selectAll")}</Button>}
+                    {files.length > 0 && <Button variant="ghost" onClick={async () => { for (const f of files) { await download(f); await new Promise((r) => setTimeout(r, 500)); } }}><Download className="h-4 w-4" /> {t("drive.download")}</Button>}
+                    <Button variant="ghost" onClick={() => setDialog({ kind: "move", items })}><FolderInput className="h-4 w-4" /> {t("drive.move")}</Button>
+                    <Button variant="danger" onClick={() => setDialog({ kind: "delete", items })}><Trash2 className="h-4 w-4" /> {t("drive.delete")}</Button>
+                  </div>
+                );
+              })()}
               <ul className={`grid gap-x-4 gap-y-5 p-4 sm:p-5 ${view === "large" ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"}`}>
                 {visible.map((item) => (
                   <Tile key={item.id} item={item} thumb={thumbs[item.id]} large={view === "large"} onOpen={() => open(item)} actions={actionsFor(item)}
-                    meta={<>{item.folder ? t("drive.folder") : <bdi dir="ltr">{formatBytes(item.size)}</bdi>} · {dateFmt(item.updatedAt)}</>} />
+                    meta={`${item.name}\n${item.folder ? t("drive.folder") : formatBytes(item.size)} · ${dateFmt(item.updatedAt)}`}
+                    selected={selected.has(item.id)} selecting={selected.size > 0} onToggleSelect={() => toggleSelect(item.id)} />
                 ))}
               </ul>
+              </>
             ) : (
             <ul className="divide-y divide-slate-100">
               {visible.map((item) => {
@@ -512,7 +533,10 @@ function Drive({ email }) {
           onSubmit={async (name) => { await driveRename(dialog.item.id, name); after(); }} />
       )}
       {dialog?.kind === "move" && (
-        <MoveDialog item={dialog.item} onClose={close} onMove={async (target) => { await driveMove(dialog.item.id, target); after(t("drive.moved")); }} />
+        <MoveDialog items={dialog.items || [dialog.item]} onClose={close} onMove={async (target) => {
+          for (const it of dialog.items || [dialog.item]) await driveMove(it.id, target);
+          setSelected(new Set()); after(t("drive.moved"));
+        }} />
       )}
       {dialog?.kind === "share" && (
         <ShareDialog item={dialog.item} onClose={() => { close(); load(); }} onChange={() => {}} />
@@ -521,7 +545,7 @@ function Drive({ email }) {
         <PreviewDialog item={dialog.item} onClose={close} onDownload={() => download(dialog.item)} />
       )}
       {dialog?.kind === "delete" && (
-        <DeleteDialog item={dialog.item} onClose={close} onDone={() => after(t("drive.deleted"))} />
+        <DeleteDialog items={dialog.items || [dialog.item]} onClose={close} onDone={() => { setSelected(new Set()); after(t("drive.deleted")); }} />
       )}
 
       {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg">{toast}</div>}
@@ -531,10 +555,16 @@ function Drive({ email }) {
 
 const VIEW_KEY = "ranilix.drive.view";
 const readView = () => { try { return ["list", "grid", "large"].includes(localStorage.getItem(VIEW_KEY)) ? localStorage.getItem(VIEW_KEY) : "list"; } catch { return "list"; } };
-const mmss = (sec) => { const s = Math.round(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const mmss = (sec) => {
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+};
 
 /** A small "⋯" menu with the file's actions (fixed on screen, so the grid never clips it). */
-function ItemMenu({ item, actions }) {
+function ItemMenu({ item, actions, plain = false }) {
   const { t } = useI18n();
   const [pos, setPos] = useState(null);
   const btn = useRef(null);
@@ -561,8 +591,8 @@ function ItemMenu({ item, actions }) {
   return (
     <>
       <button ref={btn} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={!!pos} aria-label={t("drive.actionsFor", { name: item.name })}
-        className="grid h-8 w-8 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/65">
-        <MoreHorizontal className="h-4 w-4" />
+        className={plain ? "grid h-7 w-7 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" : "grid h-8 w-8 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/65"}>
+        {plain ? <MoreVertical className="h-4 w-4" /> : <MoreHorizontal className="h-4 w-4" />}
       </button>
       {pos && (
         <div ref={menu} role="menu" className="fixed z-50 rounded-xl border border-slate-200 bg-surface p-1 shadow-xl" style={{ left: pos.left, top: pos.top, bottom: pos.bottom, width: pos.w }}>
@@ -579,7 +609,7 @@ function ItemMenu({ item, actions }) {
 }
 
 /** One file or folder in the gallery views: a picture, a video frame, or a big icon. */
-function Tile({ item, thumb, large, onOpen, actions, meta }) {
+function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, onToggleSelect }) {
   const { t } = useI18n();
   const kind = previewKind(item);
   const { Icon, tone } = typeOf(item);
@@ -604,22 +634,25 @@ function Tile({ item, thumb, large, onOpen, actions, meta }) {
     setPlaying(false);
   };
   const media = !item.folder && thumb && !broken && (kind === "image" || kind === "video");
+  const showBox = selecting || selected;
   return (
     <li className="group relative">
-      <button type="button" onClick={onOpen} className="block w-full rounded-2xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300"
+      <button type="button" onClick={selecting ? onToggleSelect : onOpen} title={meta}
+        className="block w-full rounded-xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300"
         onMouseEnter={kind === "video" ? startPreview : undefined} onMouseLeave={kind === "video" ? stopPreview : undefined}
         onFocus={kind === "video" ? startPreview : undefined} onBlur={kind === "video" ? stopPreview : undefined}>
-        <span className={`relative block overflow-hidden rounded-2xl border border-slate-200 ${large ? "aspect-video" : "aspect-[4/3]"} ${media ? "bg-black" : item.folder ? "bg-amber-50" : "bg-slate-100"}`}>
-          {media && kind === "image" && <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />}
+        <span className={`relative block overflow-hidden rounded-xl ${large ? "aspect-video" : "aspect-square"} ${media ? "bg-[#1c1c1e]" : item.folder ? "bg-amber-50" : "bg-slate-100"} ${selected ? "ring-4 ring-brand-500 ring-offset-2 ring-offset-surface" : ""}`}>
+          {media && kind === "image" && <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} className={`h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : "group-hover:scale-[1.03]"}`} />}
           {media && kind === "video" && (
-            <>
-              <video ref={vid} src={`${thumb}#t=0.05`} preload="metadata" muted playsInline disablePictureInPicture
-                onError={() => setBroken(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-                onTimeUpdate={(e) => { if (e.currentTarget.currentTime > PREVIEW_SECS) e.currentTarget.currentTime = 0; }}
-                className="pointer-events-none h-full w-full object-cover" aria-hidden="true" tabIndex={-1} />
-              <span className={`absolute inset-0 grid place-items-center transition-opacity ${playing ? "opacity-0" : "opacity-100"}`}><span className="grid h-12 w-12 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="h-5 w-5 fill-current ms-0.5" /></span></span>
-              {Number.isFinite(duration) && <span className="absolute bottom-2 end-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white" dir="ltr">{mmss(duration)}</span>}
-            </>
+            <video ref={vid} src={`${thumb}#t=0.05`} preload="metadata" muted playsInline disablePictureInPicture
+              onError={() => setBroken(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              onTimeUpdate={(e) => { if (e.currentTarget.currentTime > PREVIEW_SECS) e.currentTarget.currentTime = 0; }}
+              className={`pointer-events-none h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : ""}`} aria-hidden="true" tabIndex={-1} />
+          )}
+          {kind === "video" && Number.isFinite(duration) && (
+            <span className="absolute bottom-2 end-2 inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white backdrop-blur" dir="ltr">
+              {playing ? <Play className="h-2.5 w-2.5 fill-current" aria-hidden="true" /> : null}{mmss(duration)}
+            </span>
           )}
           {!media && (
             <span className="absolute inset-0 flex flex-col items-center justify-center gap-2">
@@ -627,16 +660,17 @@ function Tile({ item, thumb, large, onOpen, actions, meta }) {
               {!item.folder && ext && <span className="rounded bg-surface/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">{ext}</span>}
             </span>
           )}
-          {item.shared && <span className="absolute top-2 start-2 inline-flex items-center gap-1 rounded-full bg-emerald-600/90 px-2 py-0.5 text-[10px] font-bold text-white"><Link2 className="h-3 w-3" /> {t("drive.sharedChip")}</span>}
-        </span>
-        <span className="mt-2 block px-1">
-          <span className="block truncate text-sm font-semibold text-slate-900"><bdi>{item.name}</bdi></span>
-          <span className="block truncate text-xs text-slate-500">{meta}</span>
+          {item.shared && <span className="absolute bottom-2 start-2 grid h-6 w-6 place-items-center rounded-full bg-emerald-600/90 text-white" title={t("drive.sharedChip")}><Link2 className="h-3.5 w-3.5" aria-label={t("drive.sharedChip")} /></span>}
         </span>
       </button>
-      <span className="absolute top-2 end-2 transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-        <ItemMenu item={item} actions={actions} />
-      </span>
+      <button type="button" role="checkbox" aria-checked={selected} aria-label={t("drive.selectItem", { name: item.name })} onClick={onToggleSelect}
+        className={`absolute top-2 start-2 grid h-6 w-6 place-items-center rounded-md border-2 transition ${selected ? "border-brand-600 bg-brand-600 text-white" : "border-white/90 bg-black/25 text-transparent shadow-sm hover:bg-black/40"} ${showBox ? "opacity-100" : "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"}`}>
+        <Check className="h-4 w-4" strokeWidth={3} />
+      </button>
+      <div className="mt-1.5 flex items-center gap-1 ps-1">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900" title={item.name}><bdi>{item.name}</bdi></span>
+        <ItemMenu item={item} actions={actions} plain />
+      </div>
     </li>
   );
 }
@@ -659,19 +693,21 @@ function IconBtn({ label, icon: Icon, onClick, danger, className = "" }) {
   );
 }
 
-function DeleteDialog({ item, onClose, onDone }) {
+function DeleteDialog({ items, onClose, onDone }) {
+  const item = items[0];
+  const many = items.length > 1;
   const { t } = useI18n();
   const errorText = useErrorText();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const run = async () => {
     setBusy(true);
-    try { await driveDelete(item.id); onDone(); } catch (e) { setError(errorText(e)); setBusy(false); }
+    try { for (const it of items) await driveDelete(it.id); onDone(); } catch (e) { setError(errorText(e)); setBusy(false); }
   };
   return (
-    <Modal tone="danger" title={t(item.folder ? "drive.deleteFolderTitle" : "drive.deleteTitle", { name: item.name })} onClose={onClose}
+    <Modal tone="danger" title={many ? t("drive.deleteManyTitle", { n: items.length }) : t(item.folder ? "drive.deleteFolderTitle" : "drive.deleteTitle", { name: item.name })} onClose={onClose}
       footer={<><Button variant="ghost" onClick={onClose}>{t("drive.cancel")}</Button><Button variant="danger" onClick={run} disabled={busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("drive.delete")}</Button></>}>
-      <p>{t(item.folder ? "drive.deleteFolderText" : "drive.deleteText")}</p>
+      <p>{t(many ? "drive.deleteManyText" : item.folder ? "drive.deleteFolderText" : "drive.deleteText")}</p>
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
     </Modal>
   );
