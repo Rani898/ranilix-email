@@ -585,18 +585,39 @@ function Tile({ item, thumb, large, onOpen, actions, meta }) {
   const { Icon, tone } = typeOf(item);
   const [broken, setBroken] = useState(false);
   const [duration, setDuration] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const vid = useRef(null);
   const ext = (item.name.split(".").pop() || "").slice(0, 5).toUpperCase();
+  // Videos show their very first frame; pointing at one plays its first seconds (muted, on a loop).
+  const PREVIEW_SECS = 3;
+  const startPreview = () => {
+    const v = vid.current;
+    if (!v) return;
+    v.currentTime = 0;
+    v.play().then(() => setPlaying(true)).catch(() => {});
+  };
+  const stopPreview = () => {
+    const v = vid.current;
+    if (!v) return;
+    v.pause();
+    v.currentTime = 0.05;
+    setPlaying(false);
+  };
   const media = !item.folder && thumb && !broken && (kind === "image" || kind === "video");
   return (
     <li className="group relative">
-      <button type="button" onClick={onOpen} className="block w-full rounded-2xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300">
+      <button type="button" onClick={onOpen} className="block w-full rounded-2xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300"
+        onMouseEnter={kind === "video" ? startPreview : undefined} onMouseLeave={kind === "video" ? stopPreview : undefined}
+        onFocus={kind === "video" ? startPreview : undefined} onBlur={kind === "video" ? stopPreview : undefined}>
         <span className={`relative block overflow-hidden rounded-2xl border border-slate-200 ${large ? "aspect-video" : "aspect-[4/3]"} ${media ? "bg-black" : item.folder ? "bg-amber-50" : "bg-slate-100"}`}>
           {media && kind === "image" && <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />}
           {media && kind === "video" && (
             <>
-              <video src={`${thumb}#t=0.5`} preload="metadata" muted playsInline onError={() => setBroken(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+              <video ref={vid} src={`${thumb}#t=0.05`} preload="metadata" muted playsInline disablePictureInPicture
+                onError={() => setBroken(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                onTimeUpdate={(e) => { if (e.currentTarget.currentTime > PREVIEW_SECS) e.currentTarget.currentTime = 0; }}
                 className="pointer-events-none h-full w-full object-cover" aria-hidden="true" tabIndex={-1} />
-              <span className="absolute inset-0 grid place-items-center"><span className="grid h-12 w-12 place-items-center rounded-full bg-black/55 text-white backdrop-blur transition group-hover:scale-110"><Play className="h-5 w-5 fill-current ms-0.5" /></span></span>
+              <span className={`absolute inset-0 grid place-items-center transition-opacity ${playing ? "opacity-0" : "opacity-100"}`}><span className="grid h-12 w-12 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="h-5 w-5 fill-current ms-0.5" /></span></span>
               {Number.isFinite(duration) && <span className="absolute bottom-2 end-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white" dir="ltr">{mmss(duration)}</span>}
             </>
           )}
