@@ -46,7 +46,9 @@ export async function driveDefaultMb(env) {
   return Number.isFinite(n) && n >= 0 ? n : DEFAULT_QUOTA_MB;
 }
 
-export async function quotaOf(env, userId) {
+/** Admins always get everything the storage holds. */
+export async function quotaOf(env, userId, isAdminUser = false) {
+  if (isAdminUser) return maxQuotaBytes(env);
   const row = await env.DB.prepare("SELECT quota_bytes FROM drive_quota WHERE user_id = ?").bind(userId).first();
   const q = row ? row.quota_bytes : (await driveDefaultMb(env)) * MB;
   return Math.min(q, maxQuotaBytes(env));
@@ -155,7 +157,7 @@ export async function driveRoute(req, env, path, url, user, h) {
   if (!path.startsWith("/api/drive")) return null;
   const backend = driveBackend(env);
   if (backend.kind === "none") throw new HttpError(503, "File storage isn't set up on the server yet.", "drive_off");
-  const usage = async () => ({ used: await usedBy(env, user.id), quota: await quotaOf(env, user.id), maxFile: backend.maxFile, backend: backend.kind });
+  const usage = async () => ({ used: await usedBy(env, user.id), quota: await quotaOf(env, user.id, !!h.admin), maxFile: backend.maxFile, backend: backend.kind });
 
   // List a folder
   if (path === "/api/drive" && req.method === "GET") {
@@ -191,7 +193,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     const size = Number(req.headers.get("Content-Length"));
     if (!Number.isFinite(size) || size < 0) throw new HttpError(411, "Missing file size.");
     if (size > backend.maxFile) throw new HttpError(413, "This file is too big.", "drive_file_big", { max: Math.floor(backend.maxFile / MB) });
-    const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id)];
+    const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id, !!h.admin)];
     if (used + size > quota) throw new HttpError(413, "Not enough space in your drive.", "drive_full", { quota: Math.round(quota / MB) });
     if ((await siteUsed(env)) + size > backend.capacity) throw new HttpError(507, "The site's storage is full.", "drive_site_full");
     await h.rateLimit(env, `drive:up:${user.id}`, backend.kind === "kv" ? 200 : 2000, 24 * 3600 * 1000);
@@ -215,7 +217,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     const { attachmentId, parent } = await readJson(req);
     const att = await env.DB.prepare("SELECT filename, mime, size, kv_key FROM attachments WHERE id = ? AND user_id = ?").bind(Number(attachmentId), user.id).first();
     if (!att) throw new HttpError(404, "Attachment not found.", "drive_not_found");
-    const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id)];
+    const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id, !!h.admin)];
     if (used + att.size > quota) throw new HttpError(413, "Not enough space in your drive.", "drive_full", { quota: Math.round(quota / MB) });
     const parentId = await folderParam(env, user.id, parent, HttpError);
     const now = Date.now();

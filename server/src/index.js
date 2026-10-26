@@ -441,7 +441,7 @@ async function adminRoute(req, env, admin, path, url, log) {
       total: total.n,
       users: results.map((u) => ({
         staff: staffSet.has(u.id), tempAccess: tempSet.has(u.id),
-        drive: { used: driveUsed.get(u.id) || 0, quota: Math.min(driveQuota.get(u.id) ?? defaultQuota, maxQuotaBytes(env)), custom: driveQuota.has(u.id) },
+        drive: { used: driveUsed.get(u.id) || 0, quota: isAdmin(env, u.username) ? maxQuotaBytes(env) : Math.min(driveQuota.get(u.id) ?? defaultQuota, maxQuotaBytes(env)), custom: driveQuota.has(u.id) },
         id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
         accounts: { used: used.get(u.owner_id) || 1, max: limits.get(u.owner_id) ?? DEFAULT_ACCOUNTS },
@@ -479,7 +479,7 @@ async function adminRoute(req, env, admin, path, url, log) {
         await env.DB.prepare("INSERT INTO drive_quota (user_id, quota_bytes, set_by, set_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET quota_bytes = excluded.quota_bytes, set_by = excluded.set_by, set_at = excluded.set_at")
           .bind(id, bytes, admin.email, Date.now()).run();
       }
-      const quota = await quotaOf(env, id);
+      const quota = await quotaOf(env, id, protectedUser);
       log("admin", "☁️ נפח הדרייב שונה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}`, "נפח (MB)": quotaMb === null ? "ברירת מחדל" : Math.round(quota / 1024 / 1024) });
       return json({ ok: true, quota, custom: quotaMb !== null });
     }
@@ -820,7 +820,7 @@ async function route(req, env, log) {
 
   /* ---- Drive ---- */
   if (path.startsWith("/api/drive")) {
-    const res = await driveRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, log, randomHex });
+    const res = await driveRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, log, randomHex, admin: isAdmin(env, user.username) });
     if (res) return res;
   }
 
