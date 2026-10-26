@@ -168,9 +168,14 @@ async function subtree(env, userId, rootId) {
   let level = [rootId];
   for (let depth = 0; level.length && depth < 50; depth++) {
     all.push(...level);
-    const marks = level.map(() => "?").join(",");
-    const { results } = await env.DB.prepare(`SELECT id FROM drive_files WHERE user_id = ? AND parent_id IN (${marks})`).bind(userId, ...level).all();
-    level = results.map((r) => r.id);
+    const next = [];
+    for (let i = 0; i < level.length; i += 90) { // D1: at most 100 values per query
+      const part = level.slice(i, i + 90);
+      const marks = part.map(() => "?").join(",");
+      const { results } = await env.DB.prepare(`SELECT id FROM drive_files WHERE user_id = ? AND parent_id IN (${marks})`).bind(userId, ...part).all();
+      next.push(...results.map((r) => r.id));
+    }
+    level = next;
   }
   return all;
 }
@@ -353,13 +358,19 @@ export async function driveRoute(req, env, path, url, user, h) {
   // Many short-lived links at once: thumbnails for the gallery view.
   if (path === "/api/drive/links" && req.method === "POST") {
     const { ids } = await readJson(req);
-    const list = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter(Number.isInteger))].slice(0, 200);
+    const list = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter(Number.isInteger))].slice(0, 500);
     if (!list.length) return json({ links: {} });
-    const marks = list.map(() => "?").join(",");
-    const { results } = await env.DB.prepare(`SELECT id FROM drive_files WHERE user_id = ? AND is_folder = 0 AND id IN (${marks})`).bind(user.id, ...list).all();
+    // D1 allows at most 100 values in one query, so look the files up 90 at a time.
+    const found = [];
+    for (let i = 0; i < list.length; i += 90) {
+      const part = list.slice(i, i + 90);
+      const marks = part.map(() => "?").join(",");
+      const { results } = await env.DB.prepare(`SELECT id FROM drive_files WHERE user_id = ? AND is_folder = 0 AND id IN (${marks})`).bind(user.id, ...part).all();
+      found.push(...results);
+    }
     const expires = Date.now() + 6 * 3600 * 1000;
     const links = {};
-    const stmts = results.map((r) => {
+    const stmts = found.map((r) => {
       const token = h.randomHex(20);
       links[String(r.id)] = `/api/drive/f/${token}`;
       return env.DB.prepare("INSERT INTO drive_links (token, file_id, expires_at) VALUES (?, ?, ?)").bind(token, r.id, expires);
