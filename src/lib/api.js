@@ -287,7 +287,12 @@ live.driveDelete = (id) => request(`/api/drive/${id}`, { method: "DELETE", auth:
 live.driveShare = (id, on) => request(`/api/drive/${id}/share`, { method: "POST", body: { on }, auth: true });
 live.driveSaveAttachment = (attachmentId, parent = null) => request("/api/drive/from-attachment", { method: "POST", body: { attachmentId, parent }, auth: true });
 live.driveDownload = async (id, view = false) => (await request(`/api/drive/${id}/download${view ? "?view=1" : ""}`, { auth: true, raw: true })).blob();
-live.driveShareUrl = (token) => `${API_URL}/api/drive/s/${token}`;
+// The link people get opens a download page on the site (/share?f=…), which then fetches the file from the server.
+const sharePage = (token) => `${window.location.origin}${import.meta.env.BASE_URL || "/"}share?f=${token}`;
+live.driveShareUrl = sharePage;
+live.sharedInfo = (token) => request(`/api/drive/s/${encodeURIComponent(token)}/info`);
+live.sharedFileUrl = (token, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${view ? "?view=1" : ""}`;
+live.sharedFetch = async (token) => (await request(`/api/drive/s/${encodeURIComponent(token)}?view=1`, { raw: true })).blob();
 /** Upload with progress (fetch can't report upload progress, XHR can). */
 live.driveUpload = (file, parent, onProgress) => new Promise((resolve, reject) => {
   const xhr = new XMLHttpRequest();
@@ -353,7 +358,15 @@ demo.driveDelete = async (id) => {
 demo.driveShare = async (id, on) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); it.shared = !!on; it.shareToken = on ? Math.random().toString(16).slice(2).padEnd(32, "0") : null; demoDriveSave(d); return demoPub(it); };
 demo.driveSaveAttachment = async () => { throw new ApiError("", "drive_demo"); };
 demo.driveDownload = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return (await fetch(it.data)).blob(); };
-demo.driveShareUrl = (token) => `${window.location.origin}/#share-${token}`;
+demo.driveShareUrl = sharePage;
+const demoShared = (token) => {
+  const it = demoDrive().items.find((i) => i.shareToken === token && !i.folder);
+  if (!it) throw new ApiError("", "drive_link_gone");
+  return it;
+};
+demo.sharedInfo = async (token) => { const it = demoShared(token); return { name: it.name, size: it.size, mime: it.mime, sharedAt: it.updatedAt }; };
+demo.sharedFileUrl = (token) => { try { return demoShared(token).data; } catch { return "#"; } };
+demo.sharedFetch = async (token) => (await fetch(demoShared(token).data)).blob();
 
 const api = DEMO_MODE ? demo : live;
 
@@ -367,5 +380,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload,
+  driveDownload, driveShareUrl, driveUpload, sharedInfo, sharedFileUrl, sharedFetch,
 } = api;

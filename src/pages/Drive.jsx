@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Check, Play, ChevronLeft, CloudUpload, Copy, Download, Eye, File, FileArchive, FileAudio, FileSpreadsheet, FileText,
-  FileVideo, Folder, FolderInput, FolderPlus, HardDrive, Image as ImageIcon, Link2, Loader2, Pencil, Search, Trash2, X,
+  ArrowLeft, Check, Play, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
+  Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Pencil, Search, Trash2, X,
 } from "lucide-react";
 import { BRAND } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
@@ -10,38 +10,10 @@ import { Button, Modal, Toggle } from "../components/ui.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
+import { mediaType, previewKind, typeOf } from "../lib/fileTypes.js";
 import {
   AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveUpload,
 } from "../lib/api.js";
-
-const IMG = /^image\/(png|jpe?g|gif|webp|avif|bmp)$/i;
-const VIDEO_EXT = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogv: "video/ogg" };
-const AUDIO_EXT = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", aac: "audio/aac", flac: "audio/flac", opus: "audio/ogg" };
-const extOf = (name) => (name.split(".").pop() || "").toLowerCase();
-/** "image" | "video" | "audio" | null: what the site can show without downloading. */
-function previewKind(item) {
-  if (item.folder) return null;
-  const m = (item.mime || "").toLowerCase();
-  if (IMG.test(m)) return "image";
-  if (m.startsWith("video/") || VIDEO_EXT[extOf(item.name)]) return "video";
-  if (m.startsWith("audio/") || AUDIO_EXT[extOf(item.name)]) return "audio";
-  return null;
-}
-/** The real media type, so the player knows what it's playing (the server sends files as plain downloads). */
-const mediaType = (item) => (item.mime && item.mime !== "application/octet-stream" ? item.mime : VIDEO_EXT[extOf(item.name)] || AUDIO_EXT[extOf(item.name)] || "application/octet-stream");
-
-function typeOf(item) {
-  if (item.folder) return { Icon: Folder, tone: "bg-amber-50 text-amber-600" };
-  const m = item.mime || "";
-  const ext = (item.name.split(".").pop() || "").toLowerCase();
-  if (m.startsWith("image/")) return { Icon: ImageIcon, tone: "bg-pink-50 text-pink-600" };
-  if (m.startsWith("video/") || VIDEO_EXT[ext]) return { Icon: FileVideo, tone: "bg-violet-50 text-violet-600" };
-  if (m.startsWith("audio/") || AUDIO_EXT[ext]) return { Icon: FileAudio, tone: "bg-sky-50 text-sky-600" };
-  if (/zip|rar|7z|tar|gzip/.test(m) || ["zip", "rar", "7z", "gz"].includes(ext)) return { Icon: FileArchive, tone: "bg-orange-50 text-orange-600" };
-  if (/sheet|excel|csv/.test(m) || ["xlsx", "xls", "csv"].includes(ext)) return { Icon: FileSpreadsheet, tone: "bg-emerald-50 text-emerald-600" };
-  if (/pdf|text|word|document|presentation/.test(m)) return { Icon: FileText, tone: "bg-brand-50 text-brand-600" };
-  return { Icon: File, tone: "bg-slate-100 text-slate-500" };
-}
 
 function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -179,10 +151,17 @@ function ShareDialog({ item, onChange, onClose }) {
     <Modal title={t("drive.shareTitle", { name: it.name })} onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>{t("drive.close")}</Button>}>
       <Toggle id="share-on" checked={!!it.shareToken} disabled={busy} onChange={toggle} label={t("drive.shareToggle")} description={t("drive.shareHint")} />
       {link && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 p-1.5 ps-3">
-          <input readOnly dir="ltr" value={link} aria-label={t("drive.shareLink")} onFocus={(e) => e.target.select()} className="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-700 focus:outline-none" />
-          <Button onClick={copy}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? t("drive.copied") : t("drive.copy")}</Button>
-        </div>
+        <>
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 p-1.5 ps-3">
+            <input readOnly dir="ltr" value={link} aria-label={t("drive.shareLink")} onFocus={(e) => e.target.select()} className="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-700 focus:outline-none" />
+            <Button onClick={copy}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? t("drive.copied") : t("drive.copy")}</Button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="inline-flex items-center gap-1.5 text-slate-600"><Download className="h-4 w-4" aria-hidden="true" /> {t("drive.downloads", { n: it.downloads || 0 })}</span>
+            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">{t("drive.openPage")} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
+          </div>
+          <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">{t("drive.shareWho")}</p>
+        </>
       )}
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
     </Modal>
@@ -378,7 +357,7 @@ function Drive({ email }) {
                         <span className="flex items-center gap-2 text-xs text-slate-500">
                           {item.folder ? t("drive.folder") : <bdi dir="ltr">{formatBytes(item.size)}</bdi>}
                           <span aria-hidden="true">·</span>{dateFmt(item.updatedAt)}
-                          {item.shared && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700"><Link2 className="h-3 w-3" /> {t("drive.sharedChip")}</span>}
+                          {item.shared && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700"><Link2 className="h-3 w-3" /> {t("drive.sharedChip")}{item.downloads > 0 && <> · {t("drive.downloadsShort", { n: item.downloads })}</>}</span>}
                         </span>
                       </span>
                     </button>

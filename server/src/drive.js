@@ -65,6 +65,7 @@ const cleanName = (s) => String(s || "").replace(/[\u0000-\u001f\u007f/\\]/g, ""
 const clientItem = (r) => ({
   id: String(r.id), name: r.name, folder: !!r.is_folder, size: r.size, mime: r.mime || "",
   createdAt: r.created_at, updatedAt: r.updated_at, shared: !!r.share_token, shareToken: r.share_token || null,
+  downloads: r.downloads || 0,
 });
 
 async function ownItem(env, userId, id) {
@@ -106,7 +107,7 @@ async function folderParam(env, userId, raw, HttpError) {
 
 function fileResponse(body, row, inline) {
   // Images and PDFs may open in the browser; everything else downloads (an HTML file must never run as a page).
-  const safeInline = inline && /^(image\/(png|jpe?g|gif|webp|avif)|application\/pdf|text\/plain)$/.test(row.mime || "");
+  const safeInline = inline && /^(image\/(png|jpe?g|gif|webp|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|wav|aac|flac|webm)|application\/pdf|text\/plain)$/.test(row.mime || "");
   return new Response(body, {
     headers: {
       "Content-Type": safeInline ? row.mime : "application/octet-stream",
@@ -141,14 +142,20 @@ export async function deleteAllDrive(env, userId) {
 
 /** Public share link: /api/drive/s/<token> (no login). */
 export async function driveShareRoute(req, env, path, h) {
-  const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})$/);
+  const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})(\/info)?$/);
   if (!m || req.method !== "GET") return null;
   const row = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 0").bind(m[1]).first();
-  if (!row) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_not_found");
+  if (!row) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
+  // The download page asks for the name, size and type first (nothing private: no owner, no folder).
+  if (m[2]) return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at });
   await h.rateLimit(env, `share:${m[1]}`, 500, 24 * 3600 * 1000);
   const body = await get(env, row.storage_key);
-  if (!body) throw new h.HttpError(404, "Not found.", "drive_not_found");
-  return fileResponse(body, row, new URL(req.url).searchParams.get("view") === "1");
+  if (!body) throw new h.HttpError(404, "Not found.", "drive_link_gone");
+  const view = new URL(req.url).searchParams.get("view") === "1";
+  if (!view) {
+    await env.DB.prepare("INSERT INTO drive_share_stats (file_id, downloads) VALUES (?, 1) ON CONFLICT(file_id) DO UPDATE SET downloads = downloads + 1").bind(row.id).run();
+  }
+  return fileResponse(body, row, view);
 }
 
 /** /api/drive* for a logged-in user. Returns null when the path isn't ours. */
@@ -162,7 +169,8 @@ export async function driveRoute(req, env, path, url, user, h) {
   // List a folder
   if (path === "/api/drive" && req.method === "GET") {
     const folder = await folderParam(env, user.id, url.searchParams.get("folder"), HttpError);
-    const { results } = await env.DB.prepare("SELECT * FROM drive_files WHERE user_id = ? AND parent_id IS ? ORDER BY is_folder DESC, name COLLATE NOCASE LIMIT 1000")
+    const { results } = await env.DB.prepare(`SELECT f.*, COALESCE(s.downloads, 0) AS downloads FROM drive_files f LEFT JOIN drive_share_stats s ON s.file_id = f.id
+      WHERE f.user_id = ? AND f.parent_id IS ? ORDER BY f.is_folder DESC, f.name COLLATE NOCASE LIMIT 1000`)
       .bind(user.id, folder).all();
     return json({ items: results.map(clientItem), path: await breadcrumbs(env, user.id, folder), ...(await usage()) });
   }
@@ -244,6 +252,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     const { on } = await readJson(req);
     const token = on ? h.randomHex(16) : null;
     await env.DB.prepare("UPDATE drive_files SET share_token = ? WHERE id = ?").bind(token, item.id).run();
+    if (!on) await env.DB.prepare("DELETE FROM drive_share_stats WHERE file_id = ?").bind(item.id).run();
     if (on) log("accounts", "🔗 קובץ מהדרייב שותף בקישור", { "משתמש": user.email });
     return json(clientItem({ ...item, share_token: token }));
   }

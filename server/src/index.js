@@ -791,7 +791,7 @@ async function route(req, env, log) {
 
   // Public drive share links (anyone with the link).
   if (path.startsWith("/api/drive/s/")) {
-    const res = await driveShareRoute(req, env, path, { HttpError, rateLimit });
+    const res = await driveShareRoute(req, env, path, { HttpError, rateLimit, json });
     if (res) return res;
   }
 

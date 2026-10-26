@@ -249,3 +249,8 @@ CREATE TABLE IF NOT EXISTS drive_quota (
   set_by      TEXT,
   set_at      INTEGER NOT NULL
 );
+-- How many times a shared drive file was downloaded through its link.
+CREATE TABLE IF NOT EXISTS drive_share_stats (
+  file_id   INTEGER PRIMARY KEY,
+  downloads INTEGER NOT NULL DEFAULT 0
+);
