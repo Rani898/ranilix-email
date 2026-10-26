@@ -17,6 +17,7 @@ const live = {
   resetPassword: (id, password) => request(`/api/admin/users/${id}/password`, { method: "POST", body: { password }, auth: true }),
   setAccountLimit: (id, max) => request(`/api/admin/users/${id}/accounts`, { method: "PUT", body: { max }, auth: true }),
   setStaff: (id, support) => request(`/api/admin/users/${id}/staff`, { method: "PUT", body: { support }, auth: true }),
+  setDriveQuota: (id, quotaMb) => request(`/api/admin/users/${id}/drive`, { method: "PUT", body: { quotaMb }, auth: true }),
   setTempAccess: (id, allowed) => request(`/api/admin/users/${id}/temp`, { method: "PUT", body: { allowed }, auth: true }),
   deleteUser: (id, confirm) => request(`/api/admin/users/${id}`, { method: "DELETE", body: { confirm }, auth: true }),
   broadcasts: () => request("/api/admin/broadcasts", { auth: true }),
@@ -56,6 +57,7 @@ function seed() {
     suspended: n === "omer",
     admin: false,
     accounts: { used: 1 + (i % 3), max: 5 },
+    drive: { used: ((i * 7919) % 90) * 1024 * 1024, quota: 100 * 1024 * 1024, custom: false },
   }));
   users.push({ id: "1", email: me, createdAt: now - 20 * DAY, lastLoginAt: now, messages: 9, storageBytes: 0, suspended: false, admin: true, accounts: { used: 1, max: 5 } });
   // Demo: the first three addresses belong to the same person.
@@ -112,6 +114,7 @@ const demo = {
       signups: sample.map((count, i) => ({ day: from + i * DAY, count })),
       signupsOpen: s.settings.signupsOpen,
       openReports: demoReports().filter((r) => r.status === "open").length,
+      driveUsed: s.users.reduce((n, u) => n + (u.drive?.used || 0), 0), driveCapacity: 1024 * 1024 * 1024, driveBackend: "kv",
     };
   },
   async users(q = "") {
@@ -180,8 +183,14 @@ const demo = {
     }
     return { ok: true, recipients, test: !!test };
   },
-  async settings() { await delay(150); return { tempMode: "chosen", ...load().settings }; },
+  async settings() { await delay(150); return { tempMode: "chosen", driveDefaultMb: 100, drive: { backend: "kv", capacityMb: 1024, maxFileMb: 24 }, ...load().settings }; },
   async setStaff(id, support) { const s = load(); const u = s.users.find((x) => x.id === id); if (u) u.staff = !!support; save(s); return { ok: true, staff: !!support }; },
+  async setDriveQuota(id, quotaMb) {
+    if (quotaMb !== null && !(quotaMb >= 0 && quotaMb <= 1024)) throw new ApiError("", "drive_quota_range", { max: 1024 });
+    const s = load(); const u = s.users.find((x) => x.id === id);
+    if (u) u.drive = { used: u.drive?.used || 0, quota: (quotaMb ?? 100) * 1024 * 1024, custom: quotaMb !== null };
+    save(s); return { ok: true };
+  },
   async setTempAccess(id, allowed) { const s = load(); const u = s.users.find((x) => x.id === id); if (u) u.tempAccess = !!allowed; save(s); return { ok: true, tempAccess: !!allowed }; },
   async saveSettings(patch) {
     const s = load();
@@ -189,6 +198,7 @@ const demo = {
     if (typeof patch.outboundEnabled === "boolean") s.settings.outboundEnabled = patch.outboundEnabled;
     if (patch.announcement) s.settings.announcement = { ...s.settings.announcement, ...patch.announcement };
     if (["off", "chosen", "all"].includes(patch.tempMode)) s.settings.tempMode = patch.tempMode;
+    if (patch.driveDefaultMb !== undefined) s.settings.driveDefaultMb = Number(patch.driveDefaultMb);
     save(s);
     return { tempMode: "chosen", ...s.settings };
   },

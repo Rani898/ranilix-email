@@ -8,6 +8,7 @@ import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
 import { supportAdminRoute, supportRoute } from "./support.js";
+import { deleteAllDrive, driveBackend, driveDefaultMb, driveRoute, driveShareRoute, maxQuotaBytes, quotaOf, siteUsed } from "./drive.js";
 import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAutoReply, tempAllowed, tempOwner, tempRoute } from "./extras.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
@@ -211,7 +212,8 @@ async function storeFile(env, bytes, mime) {
 async function cleanupFiles(env, keys) {
   if (!env.FILES) return;
   for (const key of new Set(keys)) {
-    const still = await env.DB.prepare("SELECT 1 FROM attachments WHERE kv_key = ? LIMIT 1").bind(key).first();
+    const still = await env.DB.prepare("SELECT 1 FROM attachments WHERE kv_key = ? LIMIT 1").bind(key).first()
+      || await env.DB.prepare("SELECT 1 FROM drive_files WHERE storage_key = ? LIMIT 1").bind(key).first(); // saved to a drive
     if (!still) await env.FILES.delete(key);
   }
 }
@@ -304,6 +306,8 @@ async function getSettings(env) {
     outboundConfigured: !!env.RESEND_API_KEY,
     announcement: { enabled: s.announcement_enabled === "1", text: s.announcement_text || "", level: s.announcement_level || "info" },
     tempMode: ["off", "chosen", "all"].includes(s.temp_mode) ? s.temp_mode : "chosen",
+    driveDefaultMb: Number.isFinite(Number(s.drive_default_mb)) && s.drive_default_mb !== undefined ? Number(s.drive_default_mb) : 100,
+    drive: { backend: driveBackend(env).kind, capacityMb: Math.floor(driveBackend(env).capacity / 1024 / 1024), maxFileMb: Math.floor(driveBackend(env).maxFile / 1024 / 1024) },
   };
 }
 const setSetting = (env, key, value) =>
@@ -319,6 +323,7 @@ const isSuspended = async (env, userId) =>
 
 /** Delete a user with all their mail and files. */
 async function deleteUserCompletely(env, userId) {
+  await deleteAllDrive(env, userId);
   const { results: atts } = await env.DB.prepare("SELECT kv_key FROM attachments WHERE user_id = ?").bind(userId).all();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM attachments WHERE user_id = ?").bind(userId),
@@ -376,6 +381,9 @@ async function adminRoute(req, env, admin, path, url, log) {
       outboundToday: (await env.DB.prepare("SELECT count, window_start FROM rate_limits WHERE key = 'out:global'").first().then((r) => (r && now - r.window_start < DAY ? r.count : 0))),
       outboundLimit: OUTBOUND_GLOBAL_DAY,
       openReports: (await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'").first()).n,
+      driveUsed: await siteUsed(env),
+      driveCapacity: driveBackend(env).capacity,
+      driveBackend: driveBackend(env).kind,
       supportUnread: (await env.DB.prepare("SELECT COUNT(*) AS n FROM support_threads WHERE admin_unread > 0").first()).n,
       supportOpen: (await env.DB.prepare("SELECT COUNT(*) AS n FROM support_threads WHERE status = 'open'").first()).n,
     });
@@ -414,6 +422,14 @@ async function adminRoute(req, env, admin, path, url, log) {
       for (const r of lim) limits.set(r.owner_id, r.max_accounts);
     }
     const ids = results.map((u) => u.id);
+    const driveUsed = new Map();
+    const driveQuota = new Map();
+    if (ids.length) {
+      const marks = ids.map(() => "?").join(",");
+      for (const r of (await env.DB.prepare(`SELECT user_id, SUM(size) AS n FROM drive_files WHERE is_folder = 0 AND user_id IN (${marks}) GROUP BY user_id`).bind(...ids).all()).results) driveUsed.set(r.user_id, r.n);
+      for (const r of (await env.DB.prepare(`SELECT user_id, quota_bytes FROM drive_quota WHERE user_id IN (${marks})`).bind(...ids).all()).results) driveQuota.set(r.user_id, r.quota_bytes);
+    }
+    const defaultQuota = Math.min((await driveDefaultMb(env)) * 1024 * 1024, maxQuotaBytes(env));
     const staffSet = new Set();
     const tempSet = new Set();
     if (ids.length) {
@@ -425,6 +441,7 @@ async function adminRoute(req, env, admin, path, url, log) {
       total: total.n,
       users: results.map((u) => ({
         staff: staffSet.has(u.id), tempAccess: tempSet.has(u.id),
+        drive: { used: driveUsed.get(u.id) || 0, quota: Math.min(driveQuota.get(u.id) ?? defaultQuota, maxQuotaBytes(env)), custom: driveQuota.has(u.id) },
         id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
         accounts: { used: used.get(u.owner_id) || 1, max: limits.get(u.owner_id) ?? DEFAULT_ACCOUNTS },
@@ -433,7 +450,7 @@ async function adminRoute(req, env, admin, path, url, log) {
     });
   }
 
-  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password|accounts|staff|temp))?$/);
+  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password|accounts|staff|temp|drive))?$/);
   if (userMatch) {
     const id = Number(userMatch[1]);
     const target = await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(id).first();
@@ -450,6 +467,21 @@ async function adminRoute(req, env, admin, path, url, log) {
       }
       log("admin", support ? "🎧 נוסף לצוות התמיכה" : "🎧 הוסר מצוות התמיכה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}` });
       return json({ ok: true, staff: !!support });
+    }
+    if (userMatch[2] === "drive" && req.method === "PUT") {
+      const { quotaMb } = await readJson(req);
+      const max = maxQuotaBytes(env);
+      if (quotaMb === null) {
+        await env.DB.prepare("DELETE FROM drive_quota WHERE user_id = ?").bind(id).run(); // back to the default
+      } else {
+        const bytes = Math.round(Number(quotaMb) * 1024 * 1024);
+        if (!Number.isFinite(bytes) || bytes < 0 || bytes > max) throw new HttpError(400, "Pick a size within the limit.", "drive_quota_range", { max: Math.floor(max / 1024 / 1024) });
+        await env.DB.prepare("INSERT INTO drive_quota (user_id, quota_bytes, set_by, set_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET quota_bytes = excluded.quota_bytes, set_by = excluded.set_by, set_at = excluded.set_at")
+          .bind(id, bytes, admin.email, Date.now()).run();
+      }
+      const quota = await quotaOf(env, id);
+      log("admin", "☁️ נפח הדרייב שונה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}`, "נפח (MB)": quotaMb === null ? "ברירת מחדל" : Math.round(quota / 1024 / 1024) });
+      return json({ ok: true, quota, custom: quotaMb !== null });
     }
     if (userMatch[2] === "temp" && req.method === "PUT") {
       const { allowed } = await readJson(req);
@@ -591,6 +623,12 @@ async function adminRoute(req, env, admin, path, url, log) {
     if (typeof body.signupsOpen === "boolean") await setSetting(env, "signups_open", body.signupsOpen ? "1" : "0");
     if (typeof body.outboundEnabled === "boolean") await setSetting(env, "outbound_enabled", body.outboundEnabled ? "1" : "0");
     if (["off", "chosen", "all"].includes(body.tempMode)) await setSetting(env, "temp_mode", body.tempMode);
+    if (body.driveDefaultMb !== undefined) {
+      const n = Math.round(Number(body.driveDefaultMb));
+      const maxMb = Math.floor(maxQuotaBytes(env) / 1024 / 1024);
+      if (!Number.isFinite(n) || n < 0 || n > maxMb) throw new HttpError(400, "Pick a size within the limit.", "drive_quota_range", { max: maxMb });
+      await setSetting(env, "drive_default_mb", String(n));
+    }
     if (body.announcement) {
       const a = body.announcement;
       if (typeof a.enabled === "boolean") await setSetting(env, "announcement_enabled", a.enabled ? "1" : "0");
@@ -600,6 +638,7 @@ async function adminRoute(req, env, admin, path, url, log) {
     const changed = [typeof body.signupsOpen === "boolean" && `הרשמה: ${body.signupsOpen ? "פתוחה" : "סגורה"}`,
       typeof body.outboundEnabled === "boolean" && `שליחה חיצונית: ${body.outboundEnabled ? "פעילה" : "כבויה"}`,
       body.announcement && `באנר: ${body.announcement.enabled ? "מוצג" : "מוסתר"}`,
+      body.driveDefaultMb !== undefined && `נפח דרייב התחלתי: ${body.driveDefaultMb}MB`,
       body.tempMode && `כתובות זמניות: ${{ off: "כבוי", chosen: "לאנשים שנבחרו", all: "לכולם" }[body.tempMode] || ""}`].filter(Boolean).join(" · ");
     log("admin", "⚙️ הגדרות האתר שונו", { "מנהל": admin.email, "מה השתנה": changed });
     return json(await getSettings(env));
@@ -750,6 +789,12 @@ async function route(req, env, log) {
     if (res) return res;
   }
 
+  // Public drive share links (anyone with the link).
+  if (path.startsWith("/api/drive/s/")) {
+    const res = await driveShareRoute(req, env, path, { HttpError, rateLimit });
+    if (res) return res;
+  }
+
   // ---- Everything below needs a logged-in user ----
   const user = await requireUser(req, env);
 
@@ -771,6 +816,12 @@ async function route(req, env, log) {
     const saved = await saveAutoReply(env, user.id, await readJson(req), HttpError);
     if (before.enabled !== saved.enabled) log("accounts", saved.enabled ? "🏖️ הפעיל מענה אוטומטי" : "🏖️ כיבה מענה אוטומטי", { "כתובת": user.email });
     return json(saved);
+  }
+
+  /* ---- Drive ---- */
+  if (path.startsWith("/api/drive")) {
+    const res = await driveRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, log, randomHex });
+    if (res) return res;
   }
 
   /* ---- Temporary addresses ---- */

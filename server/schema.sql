@@ -224,3 +224,28 @@ CREATE TABLE IF NOT EXISTS staff_roles (
   granted_by TEXT,
   granted_at INTEGER NOT NULL
 );
+
+-- Drive: personal files and folders. Bytes live in R2 (binding DRIVE) or KV (FILES); storage_key points there.
+CREATE TABLE IF NOT EXISTS drive_files (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL,
+  parent_id   INTEGER,
+  name        TEXT NOT NULL,
+  is_folder   INTEGER NOT NULL DEFAULT 0,
+  size        INTEGER NOT NULL DEFAULT 0,
+  mime        TEXT,
+  storage_key TEXT,
+  share_token TEXT,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_drive_parent ON drive_files(user_id, parent_id);
+CREATE INDEX IF NOT EXISTS idx_drive_share ON drive_files(share_token);
+CREATE INDEX IF NOT EXISTS idx_drive_key ON drive_files(storage_key);
+-- Per-person drive size set by an admin (otherwise the default from settings).
+CREATE TABLE IF NOT EXISTS drive_quota (
+  user_id     INTEGER PRIMARY KEY,
+  quota_bytes INTEGER NOT NULL,
+  set_by      TEXT,
+  set_at      INTEGER NOT NULL
+);

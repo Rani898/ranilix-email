@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Flag, Hourglass, LifeBuoy, LogOut, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
+import { Check, Flag, HardDrive, Hourglass, LifeBuoy, LogOut, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
 import TempAddressesDialog from "./TempAddressesDialog.jsx";
 import { openSupport } from "./SupportWidget.jsx";
 import SenderAvatar from "./SenderAvatar.jsx";
@@ -89,6 +89,10 @@ export default function AccountMenu({ email, onLogout, usage, displayName, tempA
             </Link>
           </div>
           <div className="mt-2 space-y-0.5 border-t border-slate-100 pt-2">
+            <Link to="/drive" role="menuitem" className={item} onClick={() => setOpen(false)}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><HardDrive className="h-4 w-4" /></span>
+              {t("drive.title")}
+            </Link>
             {tempAllowed && (
               <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); setDialog("temp"); }}>
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-violet-50 text-violet-700"><Hourglass className="h-4 w-4" /></span>

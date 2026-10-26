@@ -277,6 +277,84 @@ demo.tempExtend = async (address, hours) => {
 };
 demo.tempDelete = async (address) => { demoWrite("temp", demoTemps().filter((x) => x.address !== address)); return { ok: true }; };
 
+// Drive
+live.driveList = (folder) => request(`/api/drive${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`, { auth: true });
+live.driveFolders = () => request("/api/drive/folders", { auth: true });
+live.driveCreateFolder = (name, parent) => request("/api/drive/folder", { method: "POST", body: { name, parent }, auth: true });
+live.driveRename = (id, name) => request(`/api/drive/${id}`, { method: "PATCH", body: { name }, auth: true });
+live.driveMove = (id, parent) => request(`/api/drive/${id}`, { method: "PATCH", body: { parent }, auth: true });
+live.driveDelete = (id) => request(`/api/drive/${id}`, { method: "DELETE", auth: true });
+live.driveShare = (id, on) => request(`/api/drive/${id}/share`, { method: "POST", body: { on }, auth: true });
+live.driveSaveAttachment = (attachmentId, parent = null) => request("/api/drive/from-attachment", { method: "POST", body: { attachmentId, parent }, auth: true });
+live.driveDownload = async (id, view = false) => (await request(`/api/drive/${id}/download${view ? "?view=1" : ""}`, { auth: true, raw: true })).blob();
+live.driveShareUrl = (token) => `${API_URL}/api/drive/s/${token}`;
+/** Upload with progress (fetch can't report upload progress, XHR can). */
+live.driveUpload = (file, parent, onProgress) => new Promise((resolve, reject) => {
+  const xhr = new XMLHttpRequest();
+  const q = new URLSearchParams({ name: file.name });
+  if (parent) q.set("parent", parent);
+  xhr.open("POST", `${API_URL}/api/drive/upload?${q}`);
+  xhr.setRequestHeader("Authorization", `Bearer ${getSession()?.token || ""}`);
+  xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
+  xhr.onerror = () => reject(new ApiError("Can't reach the server.", "network"));
+  xhr.onload = () => {
+    let data = {};
+    try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* ignore */ }
+    if (xhr.status === 401) return reject(new AuthError(data.error || "", "session"));
+    if (xhr.status >= 400) return reject(new ApiError(data.error || "", data.code || "generic", data.params));
+    resolve(data);
+  };
+  xhr.send(file);
+});
+
+// Demo drive: kept in this browser (small files only).
+const DEMO_DRIVE_MAX = 1024 * 1024;
+const demoDrive = () => demoRead("drive", { seq: 1, items: [] });
+const demoDriveSave = (d) => demoWrite("drive", d);
+const demoUsage = (d) => ({ used: d.items.filter((i) => !i.folder).reduce((s2, i) => s2 + i.size, 0), quota: 5 * 1024 * 1024, maxFile: DEMO_DRIVE_MAX, backend: "demo" });
+const demoPub = ({ data, parent, ...i }) => i;
+demo.driveList = async (folder = null) => {
+  const d = demoDrive();
+  const path = [];
+  for (let f = d.items.find((i) => i.id === folder); f; f = d.items.find((i) => i.id === f.parent)) path.unshift({ id: f.id, name: f.name });
+  const items = d.items.filter((i) => (i.parent || null) === (folder || null))
+    .sort((a, b) => (b.folder - a.folder) || a.name.localeCompare(b.name));
+  return { items: items.map(demoPub), path, ...demoUsage(d) };
+};
+demo.driveFolders = async () => ({ folders: demoDrive().items.filter((i) => i.folder).map((i) => ({ id: i.id, name: i.name, parent: i.parent || null })) });
+const demoAdd = (d, item) => { const now = Date.now(); const it = { id: String(d.seq++), createdAt: now, updatedAt: now, shared: false, shareToken: null, mime: "", size: 0, ...item }; d.items.push(it); return it; };
+demo.driveCreateFolder = async (name, parent) => {
+  if (!String(name || "").trim()) throw new ApiError("", "drive_name");
+  const d = demoDrive(); const it = demoAdd(d, { name: String(name).trim().slice(0, 120), folder: true, parent: parent || null }); demoDriveSave(d); return demoPub(it);
+};
+demo.driveUpload = async (file, parent, onProgress) => {
+  if (file.size > DEMO_DRIVE_MAX) throw new ApiError("", "drive_file_big", { max: 1 });
+  const d = demoDrive();
+  if (demoUsage(d).used + file.size > demoUsage(d).quota) throw new ApiError("", "drive_full", { quota: 5 });
+  onProgress?.(0.5);
+  const data = await readAsDataUrl(file);
+  onProgress?.(1);
+  const it = demoAdd(d, { name: file.name, folder: false, parent: parent || null, size: file.size, mime: file.type, data });
+  demoDriveSave(d);
+  return { item: demoPub(it), ...demoUsage(d) };
+};
+demo.driveRename = async (id, name) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); if (it) it.name = String(name).trim().slice(0, 120); demoDriveSave(d); return demoPub(it); };
+demo.driveMove = async (id, parent) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); if (it) it.parent = parent || null; demoDriveSave(d); return demoPub(it); };
+demo.driveDelete = async (id) => {
+  const d = demoDrive();
+  const gone = new Set([id]);
+  let grew = true;
+  while (grew) { grew = false; for (const i of d.items) if (i.parent && gone.has(i.parent) && !gone.has(i.id)) { gone.add(i.id); grew = true; } }
+  d.items = d.items.filter((i) => !gone.has(i.id));
+  demoDriveSave(d);
+  return { ok: true, ...demoUsage(d) };
+};
+demo.driveShare = async (id, on) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); it.shared = !!on; it.shareToken = on ? Math.random().toString(16).slice(2).padEnd(32, "0") : null; demoDriveSave(d); return demoPub(it); };
+demo.driveSaveAttachment = async () => { throw new ApiError("", "drive_demo"); };
+demo.driveDownload = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return (await fetch(it.data)).blob(); };
+demo.driveShareUrl = (token) => `${window.location.origin}/#share-${token}`;
+
 const api = DEMO_MODE ? demo : live;
 
 export const {
@@ -288,4 +366,6 @@ export const {
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
+  driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
+  driveDownload, driveShareUrl, driveUpload,
 } = api;

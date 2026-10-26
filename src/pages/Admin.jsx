@@ -321,6 +321,68 @@ function ResetModal({ user, onClose, onDone }) {
   );
 }
 
+const MBYTES = 1024 * 1024;
+
+/** Drive size for one person: any amount up to everything the storage holds. */
+function DriveQuotaModal({ user, onClose, onDone }) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  const [info, setInfo] = useState(null);
+  const [unit, setUnit] = useState(user.drive?.quota >= 1024 * MBYTES ? "GB" : "MB");
+  const [value, setValue] = useState(() => {
+    const q = user.drive?.quota || 0;
+    return String(q >= 1024 * MBYTES ? +(q / 1024 / MBYTES).toFixed(2) : Math.round(q / MBYTES));
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { adminApi.settings().then((s) => setInfo(s.drive)).catch(() => setInfo({ capacityMb: 1024 })); }, []);
+  const maxMb = info?.capacityMb ?? 0;
+  const mb = Number(value) * (unit === "GB" ? 1024 : 1);
+  const valid = info && Number.isFinite(mb) && mb >= 0 && mb <= maxMb;
+  const run = async (quotaMb) => {
+    setBusy(true);
+    try { await adminApi.setDriveQuota(user.id, quotaMb); onDone(); } catch (e) { setError(errorText(e)); setBusy(false); }
+  };
+  const presets = [100, 500, 1024, 5 * 1024, 10 * 1024].filter((p) => !info || p <= maxMb);
+  const fmt = (m) => (m >= 1024 ? `${+(m / 1024).toFixed(1)} GB` : `${m} MB`);
+  return (
+    <Modal title={t("admin.users.driveTitle", { email: user.email })} onClose={onClose}
+      footer={<>
+        {user.drive?.custom && <Button variant="ghost" className="me-auto" onClick={() => run(null)} disabled={busy}>{t("admin.users.driveReset")}</Button>}
+        <Button variant="ghost" onClick={onClose}>{t("admin.users.cancel")}</Button>
+        <Button onClick={() => run(Math.round(mb * 100) / 100)} disabled={busy || !valid}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("admin.users.driveSave")}</Button>
+      </>}>
+      <p>{t("admin.users.driveText")}</p>
+      <p className="mt-3 font-semibold text-slate-800">{t("admin.users.driveUsed", { used: formatBytes(user.drive?.used || 0), quota: formatBytes(user.drive?.quota || 0) })}</p>
+      {!info ? <Loader2 className="mt-4 h-5 w-5 animate-spin text-slate-400" /> : (
+        <>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {presets.map((p) => (
+              <button key={p} type="button" onClick={() => { setUnit(p >= 1024 ? "GB" : "MB"); setValue(String(p >= 1024 ? p / 1024 : p)); }}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${Math.abs(mb - p) < 0.01 ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 text-slate-700 hover:border-brand-400"}`}><bdi dir="ltr">{fmt(p)}</bdi></button>
+            ))}
+            <button type="button" onClick={() => { setUnit(maxMb >= 1024 ? "GB" : "MB"); setValue(String(maxMb >= 1024 ? +(maxMb / 1024).toFixed(2) : maxMb)); }}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${Math.abs(mb - maxMb) < 0.01 ? "border-brand-600 bg-brand-600 text-white" : "border-violet-300 bg-violet-50 text-violet-700 hover:border-violet-500"}`}>{t("admin.users.driveMaxBtn", { max: fmt(maxMb) })}</button>
+          </div>
+          <label htmlFor="drive-quota" className="mt-4 block text-sm font-semibold text-slate-800">{t("admin.users.driveLabel")}</label>
+          <div className="mt-1.5 flex items-center gap-2">
+            <input id="drive-quota" type="number" min="0" step="any" inputMode="decimal" dir="ltr" value={value} onChange={(e) => setValue(e.target.value)}
+              className="w-32 rounded-xl border border-slate-300 bg-surface px-3 py-2.5 text-center text-lg font-bold tabular-nums text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
+            <div className="inline-flex rounded-xl border border-slate-300 p-1">
+              {["MB", "GB"].map((u2) => (
+                <button key={u2} type="button" aria-pressed={unit === u2} onClick={() => setUnit(u2)} className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${unit === u2 ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{u2}</button>
+              ))}
+            </div>
+          </div>
+          <p className={`mt-2 text-sm ${valid ? "text-slate-500" : "text-rose-600"}`}>{t("admin.users.driveMax", { max: fmt(maxMb) })}</p>
+          {info.backend === "kv" && <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">{t("admin.users.driveKvNote")}</p>}
+        </>
+      )}
+      {error && <p role="alert" className="mt-3 text-rose-600">{error}</p>}
+    </Modal>
+  );
+}
+
 function StaffModal({ user, onClose, onDone }) {
   const { t } = useI18n();
   const errorText = useErrorText();
@@ -483,18 +545,18 @@ function UsersTab({ toast }) {
       {!data ? <Spinner /> : (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  {["user", "joined", "lastLogin", "messages", "storage", "addresses", "status"].map((k) => (
-                    <th key={k} scope="col" className={`px-4 py-3 font-semibold ${["messages", "storage", "addresses"].includes(k) ? "text-end" : "text-start"}`}>{t(`admin.users.${k}`)}</th>
+                  {["user", "joined", "lastLogin", "messages", "storage", "drive", "addresses", "status"].map((k) => (
+                    <th key={k} scope="col" className={`px-4 py-3 font-semibold ${["messages", "storage", "drive", "addresses"].includes(k) ? "text-end" : "text-start"}`}>{t(`admin.users.${k}`)}</th>
                   ))}
                   <th scope="col" className="px-4 py-3 text-end font-semibold"><span className="sr-only">{t("admin.users.actions")}</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {data.users.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-500">{t("admin.users.empty")}</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-12 text-center text-slate-500">{t("admin.users.empty")}</td></tr>
                 )}
                 {data.users.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50">
@@ -515,6 +577,11 @@ function UsersTab({ toast }) {
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">{u.lastLoginAt ? f.relative(u.lastLoginAt) : <span className="text-slate-400">{t("admin.users.never")}</span>}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">{f.num(u.messages)}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700"><bdi dir="ltr">{formatBytes(u.storageBytes)}</bdi></td>
+                    <td className="px-4 py-3 text-end tabular-nums text-slate-700">
+                      <button type="button" onClick={() => setDialog({ kind: "drive", user: u })} className="rounded-lg px-2 py-1 text-xs font-semibold hover:bg-slate-100" title={t("admin.users.driveAction")}>
+                        <bdi dir="ltr">{u.drive ? `${formatBytes(u.drive.used)} / ${formatBytes(u.drive.quota)}` : "–"}</bdi>
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">
                       <button type="button" onClick={() => setDialog({ kind: "accounts", user: u })} className="rounded-lg px-2 py-1 font-semibold hover:bg-slate-100" title={t("admin.users.accountsAction")}>
                         <bdi dir="ltr">{u.admin ? "∞" : u.accounts ? `${u.accounts.used}/${u.accounts.max}` : "–"}</bdi>
@@ -549,6 +616,7 @@ function UsersTab({ toast }) {
 
       {dialog?.kind === "suspend" && <SuspendModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.suspendedToast", dialog.user)} />}
       {dialog?.kind === "reset" && <ResetModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.resetDone", dialog.user)} />}
+      {dialog?.kind === "drive" && <DriveQuotaModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.driveDone", dialog.user)} />}
       {dialog?.kind === "staff" && <StaffModal user={dialog.user} onClose={() => setDialog(null)} onDone={done(dialog.user.staff ? "admin.users.staffRemovedToast" : "admin.users.staffAddedToast", dialog.user)} />}
       {dialog?.kind === "linked" && <LinkedModal user={dialog.user} onClose={() => setDialog(null)} onPick={(email) => { setDialog(null); setQ(email.split("@")[0]); }} />}
       {dialog?.kind === "accounts" && <AccountsModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.accountsDone", dialog.user)} />}
@@ -832,6 +900,37 @@ function DiscordCard({ toast }) {
   );
 }
 
+function DriveSettingsCard({ s, save, saving }) {
+  const { t } = useI18n();
+  const [def, setDef] = useState(String(s.driveDefaultMb ?? 100));
+  const [usage, setUsage] = useState(null);
+  useEffect(() => { adminApi.stats().then((st) => setUsage({ used: st.driveUsed || 0, capacity: st.driveCapacity || 0 })).catch(() => {}); }, []);
+  const d = s.drive || { backend: "kv", capacityMb: 1024, maxFileMb: 24 };
+  const n = Number(def);
+  const valid = Number.isFinite(n) && n >= 0 && n <= d.capacityMb;
+  const pct = usage?.capacity ? Math.min(100, (usage.used / usage.capacity) * 100) : 0;
+  return (
+    <Card className="p-5">
+      <h2 className="flex items-center gap-2 font-bold text-slate-900"><HardDrive className="h-4.5 w-4.5 text-brand-600" /> {t("admin.settings.driveTitle")}</h2>
+      <p className="mt-1 text-sm text-slate-500">{t(d.backend === "r2" ? "admin.settings.driveR2" : "admin.settings.driveKv", { cap: d.capacityMb >= 1024 ? `${d.capacityMb / 1024} GB` : `${d.capacityMb} MB`, file: d.maxFileMb })}</p>
+      {usage && (
+        <div className="mt-4">
+          <div className="flex justify-between text-sm"><span className="font-semibold text-slate-800">{t("admin.settings.driveUsage")}</span><span className="tabular-nums text-slate-600"><bdi dir="ltr">{formatBytes(usage.used)} / {formatBytes(usage.capacity)}</bdi></span></div>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${pct > 90 ? "bg-rose-500" : "bg-brand-600"}`} style={{ width: `${Math.max(pct, usage.used ? 1 : 0)}%` }} /></div>
+        </div>
+      )}
+      <label htmlFor="drive-default" className="mt-5 block text-sm font-semibold text-slate-800">{t("admin.settings.driveDefault")}</label>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <input id="drive-default" type="number" min="0" max={d.capacityMb} dir="ltr" value={def} onChange={(e) => setDef(e.target.value)}
+          className="w-32 rounded-xl border border-slate-300 bg-surface px-3 py-2.5 text-center font-bold tabular-nums text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
+        <span className="text-sm font-semibold text-slate-600">MB</span>
+        <Button onClick={() => save({ driveDefaultMb: n })} disabled={saving || !valid}>{t("admin.settings.save")}</Button>
+      </div>
+      <p className={`mt-2 text-sm ${valid ? "text-slate-500" : "text-rose-600"}`}>{t("admin.settings.driveDefaultHint", { max: d.capacityMb })}</p>
+    </Card>
+  );
+}
+
 function SettingsTab({ toast }) {
   const { t } = useI18n();
   const errorText = useErrorText();
@@ -896,6 +995,8 @@ function SettingsTab({ toast }) {
           )}
         </div>
       </Card>
+
+      <DriveSettingsCard s={s} save={save} saving={saving} />
 
       <Card className="p-5">
         <h2 className="flex items-center gap-2 font-bold text-slate-900"><Hourglass className="h-4.5 w-4.5 text-violet-600" /> {t("admin.settings.tempTitle")}</h2>

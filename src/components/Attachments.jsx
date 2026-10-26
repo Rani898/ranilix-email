@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Download, File, FileText, Image as ImageIcon, Loader2, Paperclip, X } from "lucide-react";
-import { downloadAttachment } from "../lib/api.js";
-import { useI18n } from "../lib/i18n.jsx";
+import { Check, Download, File, FileText, HardDriveUpload, Image as ImageIcon, Loader2, Paperclip, X } from "lucide-react";
+import { downloadAttachment, driveSaveAttachment } from "../lib/api.js";
+import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
 
 const isImage = (mime = "") => /^image\/(png|jpe?g|gif|webp|bmp|avif)$/i.test(mime);
@@ -41,9 +41,17 @@ function useThumbnail(att) {
   return { url, failed };
 }
 
-function AttachmentCard({ att, onError }) {
+function AttachmentCard({ att, onError, onSaved }) {
   const { t } = useI18n();
+  const errorText = useErrorText();
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const saveToDrive = async () => {
+    setSaving(true);
+    try { await driveSaveAttachment(att.id); setSaved(true); onSaved?.(t("drive.savedFromMail", { name: att.filename })); } catch (e) { onError?.(errorText(e)); }
+    setSaving(false);
+  };
   const { url } = useThumbnail(att);
   const Icon = iconFor(att.mime);
 
@@ -73,6 +81,16 @@ function AttachmentCard({ att, onError }) {
         </div>
         <button
           type="button"
+          onClick={saveToDrive}
+          disabled={saving || saved}
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800 disabled:hover:bg-transparent"
+          aria-label={t("drive.saveToDrive", { name: att.filename })}
+          title={t("drive.saveToDrive", { name: att.filename })}
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4 text-emerald-600" /> : <HardDriveUpload className="h-4 w-4" />}
+        </button>
+        <button
+          type="button"
           onClick={download}
           disabled={busy}
           className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
@@ -87,7 +105,7 @@ function AttachmentCard({ att, onError }) {
 }
 
 /** Attachments shown under an open message. */
-export function AttachmentList({ attachments, onError }) {
+export function AttachmentList({ attachments, onError, onSaved }) {
   const { t } = useI18n();
   if (!attachments?.length) return null;
   return (
@@ -97,7 +115,7 @@ export function AttachmentList({ attachments, onError }) {
         {attachments.length === 1 ? t("attachments.titleOne") : t("attachments.title", { n: attachments.length })}
       </h3>
       <ul className="mt-3 flex flex-wrap gap-3">
-        {attachments.map((a) => <AttachmentCard key={a.id} att={a} onError={onError} />)}
+        {attachments.map((a) => <AttachmentCard key={a.id} att={a} onError={onError} onSaved={onSaved} />)}
       </ul>
     </section>
   );

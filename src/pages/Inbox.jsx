@@ -6,6 +6,7 @@ import {
   BellOff,
   BellRing,
   Forward,
+  HardDrive,
   Headset,
   Hourglass,
   Palmtree,
@@ -394,6 +395,10 @@ function Inbox() {
             <span className="grid h-5 w-5 place-items-center"><GoogleMark size={18} /></span>
             <span className="flex-1 text-start">{t("gmail.folder")}</span>
           </button>
+          <Link to="/drive" className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+            <HardDrive className="h-5 w-5 text-brand-600" aria-hidden="true" />
+            <span className="flex-1 text-start">{t("drive.title")}</span>
+          </Link>
 
           <div className="mt-6 space-y-3">
             {permission === "default" && (
@@ -541,7 +546,7 @@ function Inbox() {
                 </div>
               </div>
               <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]"><LinkifiedText text={open.body} /></div>
-              <AttachmentList attachments={open.attachments} onError={setToast} />
+              <AttachmentList attachments={open.attachments} onError={setToast} onSaved={setToast} />
 
               <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-200 pt-5">
                 {[

@@ -7,6 +7,7 @@ import Inbox from "./pages/Inbox.jsx";
 import Admin from "./pages/Admin.jsx";
 import Privacy from "./pages/Privacy.jsx";
 import Settings from "./pages/Settings.jsx";
+import Drive from "./pages/Drive.jsx";
 import { useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/drive" element={<Drive />} />
         <Route path="*" element={<Landing />} />
       </Routes>
       {!onboarding && !pathname.startsWith("/admin") && <SupportWidget />}
