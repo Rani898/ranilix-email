@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Check, Play, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
+  ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, Square, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
   Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Pencil, Search, Trash2, X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
@@ -12,7 +12,7 @@ import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveUpload,
 } from "../lib/api.js";
 
 function saveBlob(blob, filename) {
@@ -230,6 +230,9 @@ function Drive({ email }) {
   const [dialog, setDialog] = useState(null); // { kind, item }
   const [uploads, setUploads] = useState([]); // { key, name, size, progress, error, done }
   const [dragging, setDragging] = useState(false);
+  const [view, setViewState] = useState(readView);
+  const [thumbs, setThumbs] = useState({}); // id -> short-lived url for the gallery
+  const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ignore */ } };
   const [toast, setToast] = useState("");
   const fileInput = useRef(null);
   const dragDepth = useRef(0);
@@ -318,6 +321,24 @@ function Drive({ email }) {
     return (data?.items || []).filter((i) => !q || i.name.toLowerCase().includes(q));
   }, [data, filter]);
 
+  // Gallery views: ask for picture/video links in one go (only the ones we don't have yet).
+  useEffect(() => {
+    if (view === "list") return;
+    const need = visible.filter((i) => (previewKind(i) === "image" || previewKind(i) === "video") && !thumbs[i.id]).map((i) => i.id);
+    if (!need.length) return;
+    let cancelled = false;
+    driveLinks(need).then((l) => { if (!cancelled) setThumbs((prev) => ({ ...prev, ...l })); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [view, visible]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const actionsFor = (item) => [
+    ...(previewKind(item) ? [{ label: previewKind(item) === "image" ? t("drive.view") : t("drive.play"), icon: previewKind(item) === "image" ? Eye : Play, onClick: () => open(item) }] : []),
+    ...(item.folder ? [] : [{ label: t("drive.download"), icon: Download, onClick: () => download(item) }, { label: t("drive.share"), icon: Link2, onClick: () => setDialog({ kind: "share", item }) }]),
+    { label: t("drive.rename"), icon: Pencil, onClick: () => setDialog({ kind: "rename", item }) },
+    { label: t("drive.move"), icon: FolderInput, onClick: () => setDialog({ kind: "move", item }) },
+    { label: t("drive.delete"), icon: Trash2, danger: true, onClick: () => setDialog({ kind: "delete", item }) },
+  ];
+
   const dateFmt = (ts) => new Date(ts).toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
   const close = () => setDialog(null);
   const after = (msg) => { close(); load(); if (msg) setToast(msg); };
@@ -369,11 +390,21 @@ function Drive({ email }) {
                 </span>
               ))}
             </nav>
-            <label className="flex w-full items-center gap-2 rounded-xl bg-slate-100 px-3 sm:w-60">
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+            <div role="group" aria-label={t("drive.viewMode")} className="inline-flex shrink-0 rounded-xl bg-slate-100 p-1">
+              {[["list", List], ["grid", LayoutGrid], ["large", Square]].map(([v, I]) => (
+                <button key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v} title={t(`drive.views.${v}`)} aria-label={t(`drive.views.${v}`)}
+                  className={`grid h-8 w-9 place-items-center rounded-lg transition ${view === v ? "bg-surface text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>
+                  <I className="h-4 w-4" />
+                </button>
+              ))}
+            </div>
+            <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-slate-100 px-3 sm:w-60 sm:flex-none">
               <Search className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
               <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("drive.search")} aria-label={t("drive.search")}
                 className="w-full bg-transparent py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none" />
             </label>
+            </div>
           </div>
 
           {!data ? (
@@ -386,6 +417,14 @@ function Drive({ email }) {
               {!filter && <Button className="mt-5" onClick={() => fileInput.current?.click()}><CloudUpload className="h-4 w-4" /> {t("drive.upload")}</Button>}
             </div>
           ) : (
+            view !== "list" ? (
+              <ul className={`grid gap-x-4 gap-y-5 p-4 sm:p-5 ${view === "large" ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"}`}>
+                {visible.map((item) => (
+                  <Tile key={item.id} item={item} thumb={thumbs[item.id]} large={view === "large"} onOpen={() => open(item)} actions={actionsFor(item)}
+                    meta={<>{item.folder ? t("drive.folder") : <bdi dir="ltr">{formatBytes(item.size)}</bdi>} · {dateFmt(item.updatedAt)}</>} />
+                ))}
+              </ul>
+            ) : (
             <ul className="divide-y divide-slate-100">
               {visible.map((item) => {
                 const { Icon, tone } = typeOf(item);
@@ -414,6 +453,7 @@ function Drive({ email }) {
                 );
               })}
             </ul>
+            )
           )}
 
           {dragging && (
@@ -486,6 +526,97 @@ function Drive({ email }) {
 
       {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg">{toast}</div>}
     </div>
+  );
+}
+
+const VIEW_KEY = "ranilix.drive.view";
+const readView = () => { try { return ["list", "grid", "large"].includes(localStorage.getItem(VIEW_KEY)) ? localStorage.getItem(VIEW_KEY) : "list"; } catch { return "list"; } };
+const mmss = (sec) => { const s = Math.round(sec); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+/** A small "⋯" menu with the file's actions (fixed on screen, so the grid never clips it). */
+function ItemMenu({ item, actions }) {
+  const { t } = useI18n();
+  const [pos, setPos] = useState(null);
+  const btn = useRef(null);
+  const menu = useRef(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = (e) => { if (!menu.current?.contains(e.target) && !btn.current?.contains(e.target)) setPos(null); };
+    const onKey = (e) => { if (e.key === "Escape") setPos(null); };
+    const onScroll = () => setPos(null);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    menu.current?.querySelector("button")?.focus();
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); };
+  }, [pos]);
+  const toggle = (e) => {
+    e.stopPropagation();
+    if (pos) return setPos(null);
+    const r = btn.current.getBoundingClientRect();
+    const w = 210;
+    const left = Math.min(Math.max(8, document.documentElement.dir === "rtl" ? r.left : r.right - w), window.innerWidth - w - 8);
+    setPos(window.innerHeight - r.bottom > 280 ? { left, top: r.bottom + 4, w } : { left, bottom: window.innerHeight - r.top + 4, w });
+  };
+  return (
+    <>
+      <button ref={btn} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={!!pos} aria-label={t("drive.actionsFor", { name: item.name })}
+        className="grid h-8 w-8 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/65">
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {pos && (
+        <div ref={menu} role="menu" className="fixed z-50 rounded-xl border border-slate-200 bg-surface p-1 shadow-xl" style={{ left: pos.left, top: pos.top, bottom: pos.bottom, width: pos.w }}>
+          {actions.map((a) => (
+            <button key={a.label} type="button" role="menuitem" onClick={(e) => { e.stopPropagation(); setPos(null); a.onClick(); }}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm focus:outline-none ${a.danger ? "text-rose-700 hover:bg-rose-50 focus:bg-rose-50" : "text-slate-700 hover:bg-slate-50 focus:bg-slate-100"}`}>
+              <a.icon className="h-4 w-4 shrink-0" aria-hidden="true" /> {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** One file or folder in the gallery views: a picture, a video frame, or a big icon. */
+function Tile({ item, thumb, large, onOpen, actions, meta }) {
+  const { t } = useI18n();
+  const kind = previewKind(item);
+  const { Icon, tone } = typeOf(item);
+  const [broken, setBroken] = useState(false);
+  const [duration, setDuration] = useState(null);
+  const ext = (item.name.split(".").pop() || "").slice(0, 5).toUpperCase();
+  const media = !item.folder && thumb && !broken && (kind === "image" || kind === "video");
+  return (
+    <li className="group relative">
+      <button type="button" onClick={onOpen} className="block w-full rounded-2xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300">
+        <span className={`relative block overflow-hidden rounded-2xl border border-slate-200 ${large ? "aspect-video" : "aspect-[4/3]"} ${media ? "bg-black" : item.folder ? "bg-amber-50" : "bg-slate-100"}`}>
+          {media && kind === "image" && <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />}
+          {media && kind === "video" && (
+            <>
+              <video src={`${thumb}#t=0.5`} preload="metadata" muted playsInline onError={() => setBroken(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                className="pointer-events-none h-full w-full object-cover" aria-hidden="true" tabIndex={-1} />
+              <span className="absolute inset-0 grid place-items-center"><span className="grid h-12 w-12 place-items-center rounded-full bg-black/55 text-white backdrop-blur transition group-hover:scale-110"><Play className="h-5 w-5 fill-current ms-0.5" /></span></span>
+              {Number.isFinite(duration) && <span className="absolute bottom-2 end-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white" dir="ltr">{mmss(duration)}</span>}
+            </>
+          )}
+          {!media && (
+            <span className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+              <span className={`grid place-items-center rounded-2xl ${large ? "h-20 w-20" : "h-14 w-14"} ${item.folder ? "text-amber-500" : tone}`}><Icon className={large ? "h-10 w-10" : "h-8 w-8"} aria-hidden="true" /></span>
+              {!item.folder && ext && <span className="rounded bg-surface/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">{ext}</span>}
+            </span>
+          )}
+          {item.shared && <span className="absolute top-2 start-2 inline-flex items-center gap-1 rounded-full bg-emerald-600/90 px-2 py-0.5 text-[10px] font-bold text-white"><Link2 className="h-3 w-3" /> {t("drive.sharedChip")}</span>}
+        </span>
+        <span className="mt-2 block px-1">
+          <span className="block truncate text-sm font-semibold text-slate-900"><bdi>{item.name}</bdi></span>
+          <span className="block truncate text-xs text-slate-500">{meta}</span>
+        </span>
+      </button>
+      <span className="absolute top-2 end-2 transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+        <ItemMenu item={item} actions={actions} />
+      </span>
+    </li>
   );
 }
 

@@ -350,6 +350,24 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ item: clientItem({ id: res.meta.last_row_id, name: final, is_folder: 0, size: att.size, mime: att.mime, created_at: now, updated_at: now }) }, 201);
   }
 
+  // Many short-lived links at once: thumbnails for the gallery view.
+  if (path === "/api/drive/links" && req.method === "POST") {
+    const { ids } = await readJson(req);
+    const list = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter(Number.isInteger))].slice(0, 200);
+    if (!list.length) return json({ links: {} });
+    const marks = list.map(() => "?").join(",");
+    const { results } = await env.DB.prepare(`SELECT id FROM drive_files WHERE user_id = ? AND is_folder = 0 AND id IN (${marks})`).bind(user.id, ...list).all();
+    const expires = Date.now() + 6 * 3600 * 1000;
+    const links = {};
+    const stmts = results.map((r) => {
+      const token = h.randomHex(20);
+      links[String(r.id)] = `/api/drive/f/${token}`;
+      return env.DB.prepare("INSERT INTO drive_links (token, file_id, expires_at) VALUES (?, ?, ?)").bind(token, r.id, expires);
+    });
+    if (stmts.length) await env.DB.batch(stmts);
+    return json({ links });
+  }
+
   const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/link)?$/);
   if (!m) return null;
   const item = await ownItem(env, user.id, m[1]);

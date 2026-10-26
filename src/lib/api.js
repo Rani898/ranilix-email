@@ -351,6 +351,11 @@ live.driveUpload = async (file, parent, onProgress) => {
     throw e;
   }
 };
+/** Short-lived addresses for many files at once (gallery thumbnails): { id: url }. */
+live.driveLinks = async (ids) => {
+  const { links } = await request("/api/drive/links", { method: "POST", auth: true, body: { ids } });
+  return Object.fromEntries(Object.entries(links).map(([id, p]) => [id, `${API_URL}${p}?view=1`]));
+};
 /** A short-lived address for the file (video player src, or a direct download). */
 live.driveLink = async (id, view = false) => `${API_URL}${(await request(`/api/drive/${id}/link`, { method: "POST", auth: true })).path}${view ? "?view=1" : ""}`;
 live.driveUploadOne = (file, parent, onProgress) => new Promise((resolve, reject) => {
@@ -416,6 +421,7 @@ demo.driveDelete = async (id) => {
 };
 demo.driveShare = async (id, on) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); it.shared = !!on; it.shareToken = on ? Math.random().toString(16).slice(2).padEnd(32, "0") : null; demoDriveSave(d); return demoPub(it); };
 demo.driveSaveAttachment = async () => { throw new ApiError("", "drive_demo"); };
+demo.driveLinks = async (ids) => Object.fromEntries(demoDrive().items.filter((i) => ids.includes(i.id) && i.data).map((i) => [i.id, i.data]));
 demo.driveLink = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return it?.data || "#"; };
 demo.driveDownload = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return (await fetch(it.data)).blob(); };
 demo.driveShareUrl = sharePage;
@@ -440,5 +446,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload, driveLink, sharedInfo, sharedFileUrl, sharedFetch,
+  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch,
 } = api;
