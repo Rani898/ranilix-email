@@ -188,6 +188,24 @@ export async function deleteAllDrive(env, userId) {
   for (const r of results) if (r.storage_key) await remove(env, r.storage_key);
 }
 
+/**
+ * Is this item inside the shared folder? Returns the chain of folders from just under the
+ * shared folder down to the item (the item last), or null when it's outside.
+ */
+async function insideShared(env, root, id) {
+  if (!Number.isInteger(id)) return null;
+  const chain = [];
+  let cur = await env.DB.prepare("SELECT id, name, is_folder, parent_id, user_id, size, mime, storage_key FROM drive_files WHERE id = ?").bind(id).first();
+  for (let i = 0; cur && i < 60; i++) {
+    if (cur.user_id !== root.user_id) return null;
+    if (cur.id === root.id) return chain.reverse();
+    chain.push(cur);
+    if (!cur.parent_id) return null;
+    cur = await env.DB.prepare("SELECT id, name, is_folder, parent_id, user_id, size, mime, storage_key FROM drive_files WHERE id = ?").bind(cur.parent_id).first();
+  }
+  return null;
+}
+
 /** Public share link: /api/drive/s/<token> (no login). */
 export async function driveShareRoute(req, env, path, h) {
   // Short-lived streaming / download link made by the owner (/api/drive/f/<token>).
@@ -200,12 +218,59 @@ export async function driveShareRoute(req, env, path, h) {
     if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
     return fileResponse(got.body, row, new URL(req.url).searchParams.get("view") === "1", got);
   }
+  // A shared folder: browse it (and its sub-folders) and open the files inside.
+  const fm = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})\/(list|file\/(\d+))$/);
+  if (fm && req.method === "GET") {
+    const root = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 1").bind(fm[1]).first();
+    if (!root) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
+    const url = new URL(req.url);
+    if (fm[2] === "list") {
+      const sub = url.searchParams.get("sub");
+      let folderId = root.id;
+      let crumbs = [];
+      if (sub) {
+        const chain = await insideShared(env, root, Number(sub));
+        if (!chain) throw new h.HttpError(404, "Not found.", "drive_not_found");
+        const target = chain[chain.length - 1];
+        if (!target.is_folder) throw new h.HttpError(404, "Not found.", "drive_not_found");
+        folderId = target.id;
+        crumbs = chain.map((c) => ({ id: String(c.id), name: c.name }));
+      }
+      const { results } = await env.DB.prepare("SELECT id, name, is_folder, size, mime, updated_at FROM drive_files WHERE user_id = ? AND parent_id = ? ORDER BY is_folder DESC, name COLLATE NOCASE LIMIT 1000")
+        .bind(root.user_id, folderId).all();
+      return h.json({
+        name: root.name, path: crumbs,
+        items: results.map((r) => ({ id: String(r.id), name: r.name, folder: !!r.is_folder, size: r.size, mime: r.mime || "", updatedAt: r.updated_at })),
+      });
+    }
+    const chain = await insideShared(env, root, Number(fm[3]));
+    const row = chain && chain[chain.length - 1];
+    if (!row || row.is_folder) throw new h.HttpError(404, "Not found.", "drive_not_found");
+    const range = req.headers.get("Range");
+    const firstPiece = !range || /^bytes=0-/.test(range);
+    if (firstPiece) await h.rateLimit(env, `share:${fm[1]}`, 3000, 24 * 3600 * 1000);
+    const got = await getForResponse(env, row.storage_key, range);
+    if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
+    const view = url.searchParams.get("view") === "1";
+    if (!view && firstPiece) {
+      await env.DB.prepare("INSERT INTO drive_share_stats (file_id, downloads) VALUES (?, 1) ON CONFLICT(file_id) DO UPDATE SET downloads = downloads + 1").bind(root.id).run();
+    }
+    return fileResponse(got.body, row, view, got);
+  }
+
   const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})(\/info)?$/);
   if (!m || req.method !== "GET") return null;
-  const row = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 0").bind(m[1]).first();
+  const row = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ?").bind(m[1]).first();
   if (!row) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
   // The download page asks for the name, size and type first (nothing private: no owner, no folder).
-  if (m[2]) return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at });
+  if (m[2]) {
+    if (row.is_folder) {
+      const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM drive_files WHERE parent_id = ? AND user_id = ?").bind(row.id, row.user_id).first();
+      return h.json({ folder: true, name: row.name, count: c.n, sharedAt: row.updated_at });
+    }
+    return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at });
+  }
+  if (row.is_folder) throw new h.HttpError(400, "That's a folder.", "drive_folder");
   const range = req.headers.get("Range");
   const firstPiece = !range || /^bytes=0-/.test(range); // a video asks for many pieces: count/limit once
   if (firstPiece) await h.rateLimit(env, `share:${m[1]}`, 500, 24 * 3600 * 1000);
@@ -400,7 +465,6 @@ export async function driveRoute(req, env, path, url, user, h) {
   }
 
   if (m[2] === "/share" && req.method === "POST") {
-    if (item.is_folder) throw new HttpError(400, "Only files can be shared.", "drive_folder");
     const { on } = await readJson(req);
     const token = on ? h.randomHex(16) : null;
     await env.DB.prepare("UPDATE drive_files SET share_token = ? WHERE id = ?").bind(token, item.id).run();

@@ -150,7 +150,7 @@ function ShareDialog({ item, onChange, onClose }) {
   };
   return (
     <Modal title={t("drive.shareTitle", { name: it.name })} onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>{t("drive.close")}</Button>}>
-      <Toggle id="share-on" checked={!!it.shareToken} disabled={busy} onChange={toggle} label={t("drive.shareToggle")} description={t("drive.shareHint")} />
+      <Toggle id="share-on" checked={!!it.shareToken} disabled={busy} onChange={toggle} label={t("drive.shareToggle")} description={t(it.folder ? "drive.shareHintFolder" : "drive.shareHint")} />
       {link && (
         <>
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 p-1.5 ps-3">
@@ -159,9 +159,9 @@ function ShareDialog({ item, onChange, onClose }) {
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="inline-flex items-center gap-1.5 text-slate-600"><Download className="h-4 w-4" aria-hidden="true" /> {t("drive.downloads", { n: it.downloads || 0 })}</span>
-            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">{t("drive.openPage")} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
+            <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">{t(it.folder ? "drive.openFolderPage" : "drive.openPage")} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
           </div>
-          <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">{t("drive.shareWho")}</p>
+          <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">{t(it.folder ? "drive.shareWhoFolder" : "drive.shareWho")}</p>
         </>
       )}
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
@@ -337,7 +337,8 @@ function Drive({ email }) {
 
   const actionsFor = (item) => [
     ...(previewKind(item) ? [{ label: previewKind(item) === "image" ? t("drive.view") : t("drive.play"), icon: previewKind(item) === "image" ? Eye : Play, onClick: () => open(item) }] : []),
-    ...(item.folder ? [] : [{ label: t("drive.download"), icon: Download, onClick: () => download(item) }, { label: t("drive.share"), icon: Link2, onClick: () => setDialog({ kind: "share", item }) }]),
+    ...(item.folder ? [] : [{ label: t("drive.download"), icon: Download, onClick: () => download(item) }]),
+    { label: t("drive.share"), icon: Link2, onClick: () => setDialog({ kind: "share", item }) },
     { label: t("drive.rename"), icon: Pencil, onClick: () => setDialog({ kind: "rename", item }) },
     { label: t("drive.move"), icon: FolderInput, onClick: () => setDialog({ kind: "move", item }) },
     { label: t("drive.delete"), icon: Trash2, danger: true, onClick: () => setDialog({ kind: "delete", item }) },
@@ -465,7 +466,7 @@ function Drive({ email }) {
                     <div className="flex shrink-0 items-center gap-0.5 sm:opacity-0 sm:transition sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                       {previewKind(item) && <IconBtn label={previewKind(item) === "image" ? t("drive.view") : t("drive.play")} icon={previewKind(item) === "image" ? Eye : Play} onClick={() => open(item)} className="max-sm:hidden" />}
                       {!item.folder && <IconBtn label={t("drive.download")} icon={Download} onClick={() => download(item)} />}
-                      {!item.folder && <IconBtn label={t("drive.share")} icon={Link2} onClick={() => setDialog({ kind: "share", item })} />}
+                      {<IconBtn label={t("drive.share")} icon={Link2} onClick={() => setDialog({ kind: "share", item })} />}
                       <IconBtn label={t("drive.rename")} icon={Pencil} onClick={() => setDialog({ kind: "rename", item })} className="max-sm:hidden" />
                       <IconBtn label={t("drive.move")} icon={FolderInput} onClick={() => setDialog({ kind: "move", item })} className="max-sm:hidden" />
                       <IconBtn label={t("drive.delete")} icon={Trash2} danger onClick={() => setDialog({ kind: "delete", item })} />

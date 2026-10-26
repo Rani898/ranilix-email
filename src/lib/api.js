@@ -292,6 +292,8 @@ const sharePage = (token) => `${window.location.origin}${import.meta.env.BASE_UR
 live.driveShareUrl = sharePage;
 live.sharedInfo = (token) => request(`/api/drive/s/${encodeURIComponent(token)}/info`);
 live.sharedFileUrl = (token, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${view ? "?view=1" : ""}`;
+live.sharedList = (token, sub) => request(`/api/drive/s/${encodeURIComponent(token)}/list${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`);
+live.sharedItemUrl = (token, id, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}/file/${encodeURIComponent(id)}${view ? "?view=1" : ""}`;
 live.sharedFetch = async (token) => (await request(`/api/drive/s/${encodeURIComponent(token)}?view=1`, { raw: true })).blob();
 /** Send one request with upload progress (fetch can't report upload progress, XHR can). */
 function xhrSend(method, path, body, contentType, onProgress) {
@@ -426,12 +428,21 @@ demo.driveLink = async (id) => { const it = demoDrive().items.find((i) => i.id =
 demo.driveDownload = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return (await fetch(it.data)).blob(); };
 demo.driveShareUrl = sharePage;
 const demoShared = (token) => {
-  const it = demoDrive().items.find((i) => i.shareToken === token && !i.folder);
+  const it = demoDrive().items.find((i) => i.shareToken === token);
   if (!it) throw new ApiError("", "drive_link_gone");
   return it;
 };
-demo.sharedInfo = async (token) => { const it = demoShared(token); return { name: it.name, size: it.size, mime: it.mime, sharedAt: it.updatedAt }; };
+demo.sharedInfo = async (token) => { const it = demoShared(token); if (it.folder) return { folder: true, name: it.name, count: demoDrive().items.filter((i) => i.parent === it.id).length, sharedAt: it.updatedAt }; return { name: it.name, size: it.size, mime: it.mime, sharedAt: it.updatedAt }; };
 demo.sharedFileUrl = (token) => { try { return demoShared(token).data; } catch { return "#"; } };
+demo.sharedList = async (token, sub) => {
+  const root = demoShared(token); const d = demoDrive();
+  const byId = (id) => d.items.find((i) => i.id === id);
+  const path = [];
+  if (sub) { let c = byId(sub); while (c && c.id !== root.id) { path.unshift({ id: c.id, name: c.name }); c = byId(c.parent); } if (!c) throw new ApiError("", "drive_not_found"); }
+  const at = sub || root.id;
+  return { name: root.name, path, items: d.items.filter((i) => i.parent === at).sort((a, b) => (b.folder - a.folder) || a.name.localeCompare(b.name)).map(demoPub) };
+};
+demo.sharedItemUrl = (token, id) => demoDrive().items.find((i) => i.id === id)?.data || "#";
 demo.sharedFetch = async (token) => (await fetch(demoShared(token).data)).blob();
 
 const api = DEMO_MODE ? demo : live;
@@ -446,5 +457,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch,
+  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl,
 } = api;
