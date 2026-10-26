@@ -32,5 +32,10 @@ binding = "FILES"
 # Replace with the id printed by: npx wrangler kv namespace create FILES
 id = "REPLACE_WITH_YOUR_KV_ID"
 
+# Drive files (Cloudflare R2: 10 GB free). Without this block the drive uses the KV namespace above.
+[[r2_buckets]]
+binding = "DRIVE"
+bucket_name = "ranilix-drive"
+
 [triggers]
 crons = ["0 3 * * *"]
