@@ -235,6 +235,15 @@ function Drive({ email }) {
   const dragDepth = useRef(0);
 
   const onAuth = useCallback(() => { endSession(email); navigate("/login", { replace: true }); }, [email, navigate]);
+
+  // Leaving the page stops an upload half way: ask first.
+  const uploading = uploads.some((u) => !u.done);
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uploading]);
   const handle = useCallback((e) => { if (e instanceof AuthError) onAuth(); else setError(errorText(e)); }, [onAuth, errorText]);
 
   const load = useCallback(async () => {

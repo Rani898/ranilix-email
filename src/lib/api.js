@@ -317,24 +317,34 @@ const SINGLE_UPLOAD_MAX = 90 * 1024 * 1024;
 live.driveUpload = async (file, parent, onProgress) => {
   if (file.size <= SINGLE_UPLOAD_MAX) return live.driveUploadOne(file, parent, onProgress);
   const start = await request("/api/drive/upload/start", { method: "POST", auth: true, body: { name: file.name, size: file.size, mime: file.type || "application/octet-stream", parent } });
+  // Three parts at a time (faster on a good connection); each part is retried up to 3 times.
   const parts = [];
-  let done = 0;
-  try {
-    for (let n = 1; n <= start.parts; n++) {
+  const loaded = new Map(); // part number -> bytes sent so far
+  const report = () => onProgress?.([...loaded.values()].reduce((a, b) => a + b, 0) / file.size);
+  let next = 1;
+  let failed = null;
+  const worker = async () => {
+    while (!failed && next <= start.parts) {
+      const n = next++;
       const chunk = file.slice((n - 1) * start.partSize, n * start.partSize);
       for (let attempt = 1; ; attempt++) {
         try {
-          const r = await xhrSend("PUT", `/api/drive/upload/${start.uploadId}/part?n=${n}`, chunk, "application/octet-stream", (loaded) => onProgress?.((done + loaded) / file.size));
+          const r = await xhrSend("PUT", `/api/drive/upload/${start.uploadId}/part?n=${n}`, chunk, "application/octet-stream", (l) => { loaded.set(n, l); report(); });
           parts.push({ partNumber: r.partNumber, etag: r.etag });
+          loaded.set(n, chunk.size);
+          report();
           break;
         } catch (e) {
-          if (attempt >= 3 || e instanceof AuthError) throw e;
+          if (attempt >= 3 || e instanceof AuthError) { failed = e; return; }
+          loaded.set(n, 0);
           await delay(1500 * attempt);
         }
       }
-      done += chunk.size;
-      onProgress?.(done / file.size);
     }
+  };
+  try {
+    await Promise.all([worker(), worker(), worker()]);
+    if (failed) throw failed;
     return await request(`/api/drive/upload/${start.uploadId}/complete`, { method: "POST", auth: true, body: { parts } });
   } catch (e) {
     request(`/api/drive/upload/${start.uploadId}/abort`, { method: "POST", auth: true }).catch(() => {});

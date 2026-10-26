@@ -20,7 +20,7 @@ export async function driveCapGb(env) {
 // Big files go up in parts (R2 multipart): each request stays under the 100 MB request limit.
 export const PART_SIZE = 20 * MB;
 const SINGLE_MAX = 90 * MB;
-const R2_MAX_FILE = 5 * GB;
+const R2_MAX_FILE = 50 * GB; // R2 allows 10,000 parts: 20 MB parts reach 200 GB, so 50 GB is well inside
 export async function driveBackend(env) {
   if (env.DRIVE) return { kind: "r2", capacity: (await driveCapGb(env)) * GB, maxFile: R2_MAX_FILE };
   if (env.FILES) return { kind: "kv", capacity: 1 * GB, maxFile: 24 * MB };
