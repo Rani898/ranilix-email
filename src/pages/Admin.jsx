@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -6,6 +6,7 @@ import {
   Copy,
   Eye,
   Flag,
+  MoreHorizontal,
   Headset,
   Hourglass,
   RotateCcw,
@@ -240,6 +241,98 @@ function Overview({ go }) {
 }
 
 /* ---------- Users ---------- */
+
+/** One "Actions" button per user: a menu with every option and a short line on what it does. */
+function UserActionsMenu({ user, onPick }) {
+  const { t } = useI18n();
+  const [pos, setPos] = useState(null); // where the open menu sits (fixed, so the table's scroll box can't clip it)
+  const btn = useRef(null);
+  const menu = useRef(null);
+  const open = !!pos;
+
+  const toggle = () => {
+    if (open) return setPos(null);
+    const r = btn.current.getBoundingClientRect();
+    const width = 300;
+    const rtl = document.documentElement.dir === "rtl";
+    const left = Math.min(Math.max(8, rtl ? r.left : r.right - width), window.innerWidth - width - 8);
+    const below = window.innerHeight - r.bottom;
+    setPos(below > 560 || below > r.top ? { left, top: r.bottom + 6, width } : { left, bottom: window.innerHeight - r.top + 6, width });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => { if (!menu.current?.contains(e.target) && !btn.current?.contains(e.target)) setPos(null); };
+    const onKey = (e) => { if (e.key === "Escape") { setPos(null); btn.current?.focus(); } };
+    const onScroll = (e) => { if (!menu.current?.contains(e.target)) setPos(null); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    menu.current?.querySelector("button")?.focus();
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+
+  const m = (k) => t(`admin.users.menu.${k}`);
+  const items = [
+    { kind: "linked", icon: Link2, title: m("linked"), desc: m("linkedDesc") },
+    { kind: "accounts", icon: Mails, title: m("accounts"), desc: m("accountsDesc") },
+    { kind: "drive", icon: HardDrive, title: m("drive"), desc: m("driveDesc") },
+    { kind: "reset", icon: KeyRound, title: m("reset"), desc: m("resetDesc") },
+    ...(user.admin ? [] : [
+      { kind: "staff", icon: Headset, title: m("staff"), desc: m("staffDesc"), on: !!user.staff },
+      { kind: "temp", icon: Hourglass, title: m("temp"), desc: m("tempDesc"), on: !!user.tempAccess },
+      { sep: true },
+      user.suspended
+        ? { kind: "restore", icon: UserCheck, title: m("restore"), desc: m("restoreDesc") }
+        : { kind: "suspend", icon: UserX, title: m("suspend"), desc: m("suspendDesc"), warn: true },
+      { kind: "delete", icon: Trash2, title: m("delete"), desc: m("deleteDesc"), danger: true },
+    ]),
+  ];
+  const onKeyNav = (e) => {
+    if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
+    e.preventDefault();
+    const list = [...menu.current.querySelectorAll("button")];
+    const i = list.indexOf(document.activeElement);
+    list[(i + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length]?.focus();
+  };
+
+  return (
+    <>
+      <button ref={btn} type="button" onClick={toggle} aria-haspopup="menu" aria-expanded={open} aria-label={t("admin.users.menu.open", { email: user.email })}
+        className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-semibold transition ${open ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-100"}`}>
+        {t("admin.users.menu.label")} <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+      </button>
+      {open && (
+        <div ref={menu} role="menu" aria-label={t("admin.users.menu.open", { email: user.email })} onKeyDown={onKeyNav}
+          className="fixed z-50 max-h-[min(40rem,calc(100dvh-1rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-surface p-1.5 text-start shadow-xl animate-[supportIn_.12s_ease-out]"
+          style={{ left: pos.left, top: pos.top, bottom: pos.bottom, width: pos.width }}>
+          <p dir="ltr" className="truncate px-3 pb-1.5 pt-1 text-xs font-semibold text-slate-500 rtl:text-right">{user.email}</p>
+          {items.map((it, i) => it.sep ? <div key={`sep${i}`} className="my-1.5 border-t border-slate-100" role="separator" /> : (
+            <button key={it.kind} type="button" role="menuitem" onClick={() => { setPos(null); onPick(it.kind); }}
+              className={`flex w-full items-start gap-3 rounded-xl px-3 py-2 text-start transition focus:outline-none ${it.danger ? "hover:bg-rose-50 focus:bg-rose-50" : "hover:bg-slate-50 focus:bg-slate-100"}`}>
+              <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ${it.danger ? "bg-rose-50 text-rose-600" : it.warn ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}><it.icon className="h-4 w-4" aria-hidden="true" /></span>
+              <span className="min-w-0 flex-1">
+                <span className={`flex items-center gap-2 text-sm font-semibold ${it.danger ? "text-rose-700" : "text-slate-900"}`}>
+                  {it.title}
+                  {it.on !== undefined && (
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${it.on ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{it.on ? m("on") : m("off")}</span>
+                  )}
+                </span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{it.desc}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
 
 function RolePills({ user }) {
   const { t } = useI18n();
@@ -566,7 +659,7 @@ function UsersTab({ toast }) {
                         <div className="min-w-0">
                           <span dir="ltr" className="block truncate font-medium text-slate-900">{u.email}</span>
                           {u.linked?.length > 1 && (
-                            <button type="button" onClick={() => setDialog({ kind: "linked", user: u })} className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-100">
+                            <button type="button" onClick={() => setDialog({ kind: "linked", user: u })} className="mt-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-100">
                               <Link2 className="h-3 w-3" aria-hidden="true" />{t("admin.users.linkedBadge", { n: u.linked.length - 1 })}
                             </button>
                           )}
@@ -578,7 +671,7 @@ function UsersTab({ toast }) {
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">{f.num(u.messages)}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700"><bdi dir="ltr">{formatBytes(u.storageBytes)}</bdi></td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">
-                      <button type="button" onClick={() => setDialog({ kind: "drive", user: u })} className="rounded-lg px-2 py-1 text-xs font-semibold hover:bg-slate-100" title={t("admin.users.driveAction")}>
+                      <button type="button" onClick={() => setDialog({ kind: "drive", user: u })} className="whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold hover:bg-slate-100" title={t("admin.users.driveAction")}>
                         <bdi dir="ltr">{u.drive ? `${formatBytes(u.drive.used)} / ${formatBytes(u.drive.quota)}` : "–"}</bdi>
                       </button>
                     </td>
@@ -588,18 +681,12 @@ function UsersTab({ toast }) {
                       </button>
                     </td>
                     <td className="px-4 py-3"><StatusPill user={u} /><RolePills user={u} /></td>
-                    <td className="px-4 py-2">
-                      <div className="flex justify-end gap-0.5">
-                        {!u.admin && (u.suspended
-                          ? <IconAction label={t("admin.users.restore")} icon={UserCheck} onClick={() => restore(u)} />
-                          : <IconAction label={t("admin.users.suspend")} icon={UserX} onClick={() => setDialog({ kind: "suspend", user: u })} />)}
-                        {!u.admin && <IconAction label={u.staff ? t("admin.users.staffRemove") : t("admin.users.staffAdd")} icon={Headset} active={u.staff} onClick={() => setDialog({ kind: "staff", user: u })} />}
-                        {!u.admin && <IconAction label={u.tempAccess ? t("admin.users.tempRemove") : t("admin.users.tempAdd")} icon={Hourglass} active={u.tempAccess} onClick={() => toggleTemp(u)} />}
-                        <IconAction label={t("admin.users.linkedAction")} icon={Link2} onClick={() => setDialog({ kind: "linked", user: u })} />
-                        <IconAction label={t("admin.users.accountsAction")} icon={Mails} onClick={() => setDialog({ kind: "accounts", user: u })} />
-                        <IconAction label={t("admin.users.resetPassword")} icon={KeyRound} onClick={() => setDialog({ kind: "reset", user: u })} />
-                        {!u.admin && <IconAction danger label={t("admin.users.delete")} icon={Trash2} onClick={() => setDialog({ kind: "delete", user: u })} />}
-                      </div>
+                    <td className="px-4 py-2 text-end">
+                      <UserActionsMenu user={u} onPick={(kind) => {
+                        if (kind === "restore") restore(u);
+                        else if (kind === "temp") toggleTemp(u);
+                        else setDialog({ kind, user: u });
+                      }} />
                     </td>
                   </tr>
                 ))}
