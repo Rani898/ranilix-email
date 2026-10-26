@@ -4,15 +4,15 @@ import {
   ArrowLeft, Check, Play, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
   Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Pencil, Search, Trash2, X,
 } from "lucide-react";
-import { BRAND } from "../config.js";
+import { BRAND, DEMO_MODE } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
 import { Button, Modal, Toggle } from "../components/ui.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
-import { mediaType, previewKind, typeOf } from "../lib/fileTypes.js";
+import { previewKind, typeOf } from "../lib/fileTypes.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveUpload,
 } from "../lib/api.js";
 
 function saveBlob(blob, filename) {
@@ -176,10 +176,16 @@ function PreviewDialog({ item, onClose, onDownload }) {
   const [unplayable, setUnplayable] = useState(false);
   useEffect(() => {
     let u;
-    driveDownload(item.id, true)
-      .then((b) => { u = URL.createObjectURL(kind === "image" ? b : new Blob([b], { type: mediaType(item) })); setUrl(u); })
-      .catch(() => setFailed(true));
-    return () => { if (u) URL.revokeObjectURL(u); };
+    let cancelled = false;
+    if (kind === "image") {
+      driveDownload(item.id, true)
+        .then((b) => { u = URL.createObjectURL(b); if (!cancelled) setUrl(u); })
+        .catch(() => setFailed(true));
+    } else {
+      // Videos and music stream from a short-lived link: they start playing right away, any size.
+      driveLink(item.id, true).then((l) => { if (!cancelled) setUrl(l); }).catch(() => setFailed(true));
+    }
+    return () => { cancelled = true; if (u) URL.revokeObjectURL(u); };
   }, [item, kind]);
   const msg = failed ? t("drive.previewFailed") : unplayable ? t("drive.cantPlay") : "";
   return (
@@ -264,7 +270,16 @@ function Drive({ email }) {
   };
 
   const download = async (item) => {
-    try { saveBlob(await driveDownload(item.id), item.name); } catch (e) { handle(e); }
+    try {
+      if (DEMO_MODE) return saveBlob(await driveDownload(item.id), item.name);
+      // A direct link: the browser downloads it itself (with its own progress bar), so big files work too.
+      const a = document.createElement("a");
+      a.href = await driveLink(item.id);
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) { handle(e); }
   };
   const open = async (item) => {
     if (item.folder) return openFolder(item.id);

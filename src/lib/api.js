@@ -293,8 +293,57 @@ live.driveShareUrl = sharePage;
 live.sharedInfo = (token) => request(`/api/drive/s/${encodeURIComponent(token)}/info`);
 live.sharedFileUrl = (token, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${view ? "?view=1" : ""}`;
 live.sharedFetch = async (token) => (await request(`/api/drive/s/${encodeURIComponent(token)}?view=1`, { raw: true })).blob();
-/** Upload with progress (fetch can't report upload progress, XHR can). */
-live.driveUpload = (file, parent, onProgress) => new Promise((resolve, reject) => {
+/** Send one request with upload progress (fetch can't report upload progress, XHR can). */
+function xhrSend(method, path, body, contentType, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, `${API_URL}${path}`);
+    xhr.setRequestHeader("Authorization", `Bearer ${getSession()?.token || ""}`);
+    if (contentType) xhr.setRequestHeader("Content-Type", contentType);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded); };
+    xhr.onerror = () => reject(new ApiError("Can't reach the server.", "network"));
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* ignore */ }
+      if (xhr.status === 401) return reject(new AuthError(data.error || "", "session"));
+      if (xhr.status >= 400) return reject(new ApiError(data.error || "", data.code || "generic", data.params));
+      resolve(data);
+    };
+    xhr.send(body);
+  });
+}
+const SINGLE_UPLOAD_MAX = 90 * 1024 * 1024;
+/** Big files go up in parts (each part retried up to 3 times), small ones in one request. */
+live.driveUpload = async (file, parent, onProgress) => {
+  if (file.size <= SINGLE_UPLOAD_MAX) return live.driveUploadOne(file, parent, onProgress);
+  const start = await request("/api/drive/upload/start", { method: "POST", auth: true, body: { name: file.name, size: file.size, mime: file.type || "application/octet-stream", parent } });
+  const parts = [];
+  let done = 0;
+  try {
+    for (let n = 1; n <= start.parts; n++) {
+      const chunk = file.slice((n - 1) * start.partSize, n * start.partSize);
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const r = await xhrSend("PUT", `/api/drive/upload/${start.uploadId}/part?n=${n}`, chunk, "application/octet-stream", (loaded) => onProgress?.((done + loaded) / file.size));
+          parts.push({ partNumber: r.partNumber, etag: r.etag });
+          break;
+        } catch (e) {
+          if (attempt >= 3 || e instanceof AuthError) throw e;
+          await delay(1500 * attempt);
+        }
+      }
+      done += chunk.size;
+      onProgress?.(done / file.size);
+    }
+    return await request(`/api/drive/upload/${start.uploadId}/complete`, { method: "POST", auth: true, body: { parts } });
+  } catch (e) {
+    request(`/api/drive/upload/${start.uploadId}/abort`, { method: "POST", auth: true }).catch(() => {});
+    throw e;
+  }
+};
+/** A short-lived address for the file (video player src, or a direct download). */
+live.driveLink = async (id, view = false) => `${API_URL}${(await request(`/api/drive/${id}/link`, { method: "POST", auth: true })).path}${view ? "?view=1" : ""}`;
+live.driveUploadOne = (file, parent, onProgress) => new Promise((resolve, reject) => {
   const xhr = new XMLHttpRequest();
   const q = new URLSearchParams({ name: file.name });
   if (parent) q.set("parent", parent);
@@ -357,6 +406,7 @@ demo.driveDelete = async (id) => {
 };
 demo.driveShare = async (id, on) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); it.shared = !!on; it.shareToken = on ? Math.random().toString(16).slice(2).padEnd(32, "0") : null; demoDriveSave(d); return demoPub(it); };
 demo.driveSaveAttachment = async () => { throw new ApiError("", "drive_demo"); };
+demo.driveLink = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return it?.data || "#"; };
 demo.driveDownload = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return (await fetch(it.data)).blob(); };
 demo.driveShareUrl = sharePage;
 const demoShared = (token) => {
@@ -380,5 +430,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload, sharedInfo, sharedFileUrl, sharedFetch,
+  driveDownload, driveShareUrl, driveUpload, driveLink, sharedInfo, sharedFileUrl, sharedFetch,
 } = api;

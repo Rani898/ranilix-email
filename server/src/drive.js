@@ -17,8 +17,12 @@ export async function driveCapGb(env) {
   const n = Number(row?.value);
   return Number.isFinite(n) && n >= 1 && n <= MAX_CAP_GB && row ? n : DEFAULT_CAP_GB;
 }
+// Big files go up in parts (R2 multipart): each request stays under the 100 MB request limit.
+export const PART_SIZE = 20 * MB;
+const SINGLE_MAX = 90 * MB;
+const R2_MAX_FILE = 5 * GB;
 export async function driveBackend(env) {
-  if (env.DRIVE) return { kind: "r2", capacity: (await driveCapGb(env)) * GB, maxFile: 95 * MB };
+  if (env.DRIVE) return { kind: "r2", capacity: (await driveCapGb(env)) * GB, maxFile: R2_MAX_FILE };
   if (env.FILES) return { kind: "kv", capacity: 1 * GB, maxFile: 24 * MB };
   return { kind: "none", capacity: 0, maxFile: 0 };
 }
@@ -37,6 +41,34 @@ async function get(env, key) {
   if (inKv(key)) return env.FILES ? env.FILES.get(key, "stream") : null;
   return env.DRIVE ? (await env.DRIVE.get(key))?.body ?? null : null;
 }
+/** Read a file, honouring an HTTP Range request when the bytes are in R2 (lets videos stream and seek). */
+async function getForResponse(env, key, rangeHeader) {
+  if (inKv(key) || !env.DRIVE) {
+    const body = await get(env, key);
+    return body ? { body, status: 200, headers: {} } : null;
+  }
+  const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader || "");
+  if (!m || (m[1] === "" && m[2] === "")) {
+    const obj = await env.DRIVE.get(key);
+    return obj ? { body: obj.body, status: 200, headers: { "Content-Length": String(obj.size), "Accept-Ranges": "bytes" } } : null;
+  }
+  const head = await env.DRIVE.head(key);
+  if (!head) return null;
+  const total = head.size;
+  let start; let end;
+  if (m[1] === "") { start = Math.max(0, total - Number(m[2])); end = total - 1; }
+  else { start = Number(m[1]); end = m[2] === "" ? total - 1 : Math.min(Number(m[2]), total - 1); }
+  if (start >= total || start > end) {
+    return { body: null, status: 416, headers: { "Content-Range": `bytes */${total}` } };
+  }
+  const obj = await env.DRIVE.get(key, { range: { offset: start, length: end - start + 1 } });
+  if (!obj) return null;
+  return {
+    body: obj.body, status: 206,
+    headers: { "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(end - start + 1), "Accept-Ranges": "bytes" },
+  };
+}
+
 async function remove(env, key) {
   if (key.startsWith("att/")) {
     // Shared with an email attachment: only delete when nothing else points to it.
@@ -114,11 +146,13 @@ async function folderParam(env, userId, raw, HttpError) {
   return f.id;
 }
 
-function fileResponse(body, row, inline) {
+function fileResponse(body, row, inline, extra = { status: 200, headers: {} }) {
   // Images and PDFs may open in the browser; everything else downloads (an HTML file must never run as a page).
   const safeInline = inline && /^(image\/(png|jpe?g|gif|webp|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|wav|aac|flac|webm)|application\/pdf|text\/plain)$/.test(row.mime || "");
   return new Response(body, {
+    status: extra.status,
     headers: {
+      ...extra.headers,
       "Content-Type": safeInline ? row.mime : "application/octet-stream",
       "Content-Disposition": `${safeInline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
       "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
@@ -151,20 +185,32 @@ export async function deleteAllDrive(env, userId) {
 
 /** Public share link: /api/drive/s/<token> (no login). */
 export async function driveShareRoute(req, env, path, h) {
+  // Short-lived streaming / download link made by the owner (/api/drive/f/<token>).
+  const f = path.match(/^\/api\/drive\/f\/([a-f0-9]{40})$/);
+  if (f && req.method === "GET") {
+    const link = await env.DB.prepare("SELECT file_id FROM drive_links WHERE token = ? AND expires_at > ?").bind(f[1], Date.now()).first();
+    const row = link && await env.DB.prepare("SELECT * FROM drive_files WHERE id = ? AND is_folder = 0").bind(link.file_id).first();
+    if (!row) throw new h.HttpError(404, "This link has expired.", "drive_link_gone");
+    const got = await getForResponse(env, row.storage_key, req.headers.get("Range"));
+    if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
+    return fileResponse(got.body, row, new URL(req.url).searchParams.get("view") === "1", got);
+  }
   const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})(\/info)?$/);
   if (!m || req.method !== "GET") return null;
   const row = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 0").bind(m[1]).first();
   if (!row) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
   // The download page asks for the name, size and type first (nothing private: no owner, no folder).
   if (m[2]) return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at });
-  await h.rateLimit(env, `share:${m[1]}`, 500, 24 * 3600 * 1000);
-  const body = await get(env, row.storage_key);
-  if (!body) throw new h.HttpError(404, "Not found.", "drive_link_gone");
+  const range = req.headers.get("Range");
+  const firstPiece = !range || /^bytes=0-/.test(range); // a video asks for many pieces: count/limit once
+  if (firstPiece) await h.rateLimit(env, `share:${m[1]}`, 500, 24 * 3600 * 1000);
+  const got = await getForResponse(env, row.storage_key, range);
+  if (!got) throw new h.HttpError(404, "Not found.", "drive_link_gone");
   const view = new URL(req.url).searchParams.get("view") === "1";
-  if (!view) {
+  if (!view && firstPiece) {
     await env.DB.prepare("INSERT INTO drive_share_stats (file_id, downloads) VALUES (?, 1) ON CONFLICT(file_id) DO UPDATE SET downloads = downloads + 1").bind(row.id).run();
   }
-  return fileResponse(body, row, view);
+  return fileResponse(got.body, row, view, got);
 }
 
 /** /api/drive* for a logged-in user. Returns null when the path isn't ours. */
@@ -209,7 +255,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     if (!name) throw new HttpError(400, "The file needs a name.", "drive_name");
     const size = Number(req.headers.get("Content-Length"));
     if (!Number.isFinite(size) || size < 0) throw new HttpError(411, "Missing file size.");
-    if (size > backend.maxFile) throw new HttpError(413, "This file is too big.", "drive_file_big", { max: Math.floor(backend.maxFile / MB) });
+    if (size > Math.min(backend.maxFile, SINGLE_MAX)) throw new HttpError(413, "This file is too big.", "drive_file_big", { max: Math.floor(backend.maxFile / MB) });
     const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id, !!h.admin)];
     if (used + size > quota) throw new HttpError(413, "Not enough space in your drive.", "drive_full", { quota: Math.round(quota / MB) });
     if ((await siteUsed(env)) + size > backend.capacity) throw new HttpError(507, "The site's storage is full.", "drive_site_full");
@@ -229,6 +275,66 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ item: clientItem({ id: res.meta.last_row_id, name: final, is_folder: 0, size, mime, created_at: now, updated_at: now }), ...(await usage()) }, 201);
   }
 
+  /* ---- Big files: upload in parts (R2 only) ---- */
+  if (path === "/api/drive/upload/start" && req.method === "POST") {
+    if (backend.kind !== "r2") throw new HttpError(413, "This file is too big.", "drive_file_big", { max: Math.floor(backend.maxFile / MB) });
+    const { name: rawName, size, mime: rawMime, parent } = await readJson(req);
+    const name = cleanName(rawName);
+    if (!name) throw new HttpError(400, "The file needs a name.", "drive_name");
+    const total = Number(size);
+    if (!Number.isFinite(total) || total <= 0) throw new HttpError(400, "Invalid request.");
+    if (total > backend.maxFile) throw new HttpError(413, "This file is too big.", "drive_file_big", { max: Math.floor(backend.maxFile / MB) });
+    const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id, !!h.admin)];
+    if (used + total > quota) throw new HttpError(413, "Not enough space in your drive.", "drive_full", { quota: Math.round(quota / MB) });
+    if ((await siteUsed(env)) + total > backend.capacity) throw new HttpError(507, "The site's storage is full.", "drive_site_full");
+    await h.rateLimit(env, `drive:up:${user.id}`, 2000, 24 * 3600 * 1000);
+    const parentId = await folderParam(env, user.id, parent, HttpError);
+    const mime = String(rawMime || "application/octet-stream").split(";")[0].slice(0, 100);
+    const key = `drive/${user.id}/${h.randomHex(16)}`;
+    const mp = await env.DRIVE.createMultipartUpload(key, { httpMetadata: { contentType: mime } });
+    const res = await env.DB.prepare("INSERT INTO drive_uploads (user_id, r2_upload_id, storage_key, name, size, mime, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(user.id, mp.uploadId, key, name, total, mime, parentId, Date.now()).run();
+    return json({ uploadId: String(res.meta.last_row_id), partSize: PART_SIZE, parts: Math.ceil(total / PART_SIZE) }, 201);
+  }
+  const up = path.match(/^\/api\/drive\/upload\/(\d+)\/(part|complete|abort)$/);
+  if (up) {
+    const row = await env.DB.prepare("SELECT * FROM drive_uploads WHERE id = ? AND user_id = ?").bind(Number(up[1]), user.id).first();
+    if (!row || !env.DRIVE) throw new HttpError(404, "This upload wasn't found.", "drive_not_found");
+    const mp = env.DRIVE.resumeMultipartUpload(row.storage_key, row.r2_upload_id);
+    if (up[2] === "part" && req.method === "PUT") {
+      const n = Number(url.searchParams.get("n"));
+      if (!Number.isInteger(n) || n < 1 || n > Math.ceil(row.size / PART_SIZE)) throw new HttpError(400, "Invalid request.");
+      const bytes = await req.arrayBuffer();
+      if (bytes.byteLength > PART_SIZE || bytes.byteLength === 0) throw new HttpError(400, "Invalid request.");
+      const part = await mp.uploadPart(n, bytes);
+      return json({ partNumber: n, etag: part.etag });
+    }
+    if (up[2] === "complete" && req.method === "POST") {
+      const { parts } = await readJson(req);
+      if (!Array.isArray(parts) || !parts.length) throw new HttpError(400, "Invalid request.");
+      const obj = await mp.complete(parts.map((p) => ({ partNumber: Number(p.partNumber), etag: String(p.etag) })).sort((a, b) => a.partNumber - b.partNumber));
+      await env.DB.prepare("DELETE FROM drive_uploads WHERE id = ?").bind(row.id).run();
+      const size = obj.size;
+      const [used, quota] = [await usedBy(env, user.id), await quotaOf(env, user.id, !!h.admin)];
+      if (size > backend.maxFile || used + size > quota) {
+        await env.DRIVE.delete(row.storage_key);
+        throw new HttpError(413, "Not enough space in your drive.", "drive_full", { quota: Math.round(quota / MB) });
+      }
+      const now = Date.now();
+      const final = await freeName(env, user.id, row.parent_id, row.name);
+      const res = await env.DB.prepare("INSERT INTO drive_files (user_id, parent_id, name, is_folder, size, mime, storage_key, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)")
+        .bind(user.id, row.parent_id, final, size, row.mime, row.storage_key, now, now).run();
+      log("accounts", "☁️ קובץ גדול הועלה לדרייב", { "משתמש": user.email, "גודל (MB)": (size / MB).toFixed(1) });
+      return json({ item: clientItem({ id: res.meta.last_row_id, name: final, is_folder: 0, size, mime: row.mime, created_at: now, updated_at: now }), ...(await usage()) }, 201);
+    }
+    if (up[2] === "abort" && req.method === "POST") {
+      try { await mp.abort(); } catch { /* already gone */ }
+      await env.DB.prepare("DELETE FROM drive_uploads WHERE id = ?").bind(row.id).run();
+      return json({ ok: true });
+    }
+    throw new HttpError(405, "Not allowed.");
+  }
+
   // Save an email attachment to the drive (no copy needed: it points to the same stored file)
   if (path === "/api/drive/from-attachment" && req.method === "POST") {
     const { attachmentId, parent } = await readJson(req);
@@ -244,7 +350,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ item: clientItem({ id: res.meta.last_row_id, name: final, is_folder: 0, size: att.size, mime: att.mime, created_at: now, updated_at: now }) }, 201);
   }
 
-  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share)?$/);
+  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/link)?$/);
   if (!m) return null;
   const item = await ownItem(env, user.id, m[1]);
   if (!item) throw new HttpError(404, "Not found.", "drive_not_found");
@@ -254,6 +360,14 @@ export async function driveRoute(req, env, path, url, user, h) {
     const body = await get(env, item.storage_key);
     if (!body) throw new HttpError(404, "Not found.", "drive_not_found");
     return fileResponse(body, item, url.searchParams.get("view") === "1");
+  }
+
+  // A short-lived link for the video player or a direct download (works without the login header).
+  if (m[2] === "/link" && req.method === "POST") {
+    if (item.is_folder) throw new HttpError(400, "Folders can't be downloaded.", "drive_folder");
+    const token = h.randomHex(20);
+    await env.DB.prepare("INSERT INTO drive_links (token, file_id, expires_at) VALUES (?, ?, ?)").bind(token, item.id, Date.now() + 6 * 3600 * 1000).run();
+    return json({ path: `/api/drive/f/${token}` });
   }
 
   if (m[2] === "/share" && req.method === "POST") {
@@ -302,4 +416,15 @@ export async function driveRoute(req, env, path, url, user, h) {
   }
 
   throw new HttpError(405, "Not allowed.");
+}
+
+/** Daily: drop expired links and give up on uploads that never finished. */
+export async function driveCleanup(env) {
+  await env.DB.prepare("DELETE FROM drive_links WHERE expires_at < ?").bind(Date.now()).run();
+  if (!env.DRIVE) return;
+  const { results } = await env.DB.prepare("SELECT * FROM drive_uploads WHERE created_at < ?").bind(Date.now() - 24 * 3600 * 1000).all();
+  for (const r of results) {
+    try { await env.DRIVE.resumeMultipartUpload(r.storage_key, r.r2_upload_id).abort(); } catch { /* gone */ }
+    await env.DB.prepare("DELETE FROM drive_uploads WHERE id = ?").bind(r.id).run();
+  }
 }

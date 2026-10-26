@@ -254,3 +254,21 @@ CREATE TABLE IF NOT EXISTS drive_share_stats (
   file_id   INTEGER PRIMARY KEY,
   downloads INTEGER NOT NULL DEFAULT 0
 );
+-- Big drive uploads in progress (R2 multipart): the browser sends the file in parts.
+CREATE TABLE IF NOT EXISTS drive_uploads (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL,
+  r2_upload_id TEXT NOT NULL,
+  storage_key  TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  size         INTEGER NOT NULL,
+  mime         TEXT,
+  parent_id    INTEGER,
+  created_at   INTEGER NOT NULL
+);
+-- Short-lived links to stream or download a drive file (a video player can't send a login header).
+CREATE TABLE IF NOT EXISTS drive_links (
+  token      TEXT PRIMARY KEY,
+  file_id    INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);

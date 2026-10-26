@@ -8,7 +8,7 @@ import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
 import { supportAdminRoute, supportRoute } from "./support.js";
-import { MAX_CAP_GB, deleteAllDrive, driveBackend, driveDefaultMb, driveRoute, driveShareRoute, maxQuotaBytes, quotaOf, siteUsed } from "./drive.js";
+import { MAX_CAP_GB, deleteAllDrive, driveCleanup, driveBackend, driveDefaultMb, driveRoute, driveShareRoute, maxQuotaBytes, quotaOf, siteUsed } from "./drive.js";
 import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAutoReply, tempAllowed, tempOwner, tempRoute } from "./extras.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
@@ -124,7 +124,7 @@ function corsHeaders(req, env) {
   const h = {
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Support-Key",
-    "Access-Control-Expose-Headers": "Content-Disposition",
+    "Access-Control-Expose-Headers": "Content-Disposition, Content-Range, Accept-Ranges",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -801,7 +801,7 @@ async function route(req, env, log) {
   }
 
   // Public drive share links (anyone with the link).
-  if (path.startsWith("/api/drive/s/")) {
+  if (path.startsWith("/api/drive/s/") || path.startsWith("/api/drive/f/")) {
     const res = await driveShareRoute(req, env, path, { HttpError, rateLimit, json });
     if (res) return res;
   }
@@ -1225,5 +1225,6 @@ export default {
     await env.DB.prepare("DELETE FROM oauth_states WHERE created_at < ?").bind(now - DAY).run();
     await env.DB.prepare("DELETE FROM temp_addresses WHERE expires_at < ?").bind(now - 7 * DAY).run();
     await env.DB.prepare("DELETE FROM auto_reply_log WHERE sent_at < ?").bind(now - 30 * DAY).run();
+    await driveCleanup(env);
   },
 };

@@ -7,8 +7,8 @@ import LogoMark from "../components/LogoMark.jsx";
 import Preferences from "../components/Preferences.jsx";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
-import { mediaType, previewKind, typeOf } from "../lib/fileTypes.js";
-import { sharedFetch, sharedFileUrl, sharedInfo } from "../lib/api.js";
+import { previewKind, typeOf } from "../lib/fileTypes.js";
+import { sharedFileUrl, sharedInfo } from "../lib/api.js";
 
 const PREVIEW_MAX = 30 * 1024 * 1024; // show it in the page only when it's small enough to load whole
 
@@ -17,25 +17,19 @@ function Preview({ token, info }) {
   const kind = previewKind(info);
   const [url, setUrl] = useState(null);
   const [bad, setBad] = useState(false);
-  useEffect(() => {
-    if (!kind || info.size > PREVIEW_MAX) return;
-    let u;
-    sharedFetch(token)
-      .then((b) => { u = URL.createObjectURL(kind === "image" ? b : new Blob([b], { type: mediaType(info) })); setUrl(u); })
-      .catch(() => setBad(true));
-    return () => { if (u) URL.revokeObjectURL(u); };
-  }, [token, info, kind]);
-  if (!kind || info.size > PREVIEW_MAX || bad) return null;
+  // Straight from the server: videos stream and can be skipped through, whatever their size.
+  useEffect(() => { if (kind) setUrl(sharedFileUrl(token, true)); }, [token, kind]);
+  if (!kind || (kind === "image" && info.size > PREVIEW_MAX) || bad) return null;
   return (
     <div className={`mt-6 grid min-h-40 place-items-center overflow-hidden rounded-2xl ${kind === "video" ? "bg-black" : "bg-slate-100"}`}>
       {!url ? <Loader2 className={`h-6 w-6 animate-spin ${kind === "video" ? "text-white/60" : "text-slate-400"}`} />
-        : kind === "video" ? <video src={url} controls playsInline onError={() => setBad(true)} className="max-h-[60vh] w-full bg-black" aria-label={info.name} />
+        : kind === "video" ? <video src={url} controls playsInline preload="metadata" onError={() => setBad(true)} className="max-h-[60vh] w-full bg-black" aria-label={info.name} />
         : kind === "audio" ? (
           <div className="flex w-full flex-col items-center gap-3 p-6">
             <FileAudio className="h-8 w-8 text-sky-600" aria-hidden="true" />
             <audio src={url} controls onError={() => setBad(true)} className="w-full" aria-label={info.name} />
           </div>
-        ) : <img src={url} alt={info.name} className="max-h-[60vh] w-auto object-contain" />}
+        ) : <img src={url} alt={info.name} onError={() => setBad(true)} className="max-h-[60vh] w-auto object-contain" />}
       {kind !== "image" && url && <span className="sr-only">{t("shared.preview")}</span>}
     </div>
   );
