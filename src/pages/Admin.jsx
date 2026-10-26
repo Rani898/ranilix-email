@@ -6,6 +6,8 @@ import {
   Copy,
   Eye,
   Flag,
+  Headset,
+  Hourglass,
   RotateCcw,
   HardDrive,
   KeyRound,
@@ -41,6 +43,7 @@ import { formatBytes } from "../lib/validation.js";
 import SupportTab from "./AdminSupport.jsx";
 
 const DAY = 24 * 3600 * 1000;
+const STAFF_TABS = ["support", "reports"];
 const TABS = [
   { id: "overview", icon: LayoutDashboard },
   { id: "users", icon: Users },
@@ -238,6 +241,17 @@ function Overview({ go }) {
 
 /* ---------- Users ---------- */
 
+function RolePills({ user }) {
+  const { t } = useI18n();
+  if (user.admin || (!user.staff && !user.tempAccess)) return null;
+  return (
+    <span className="mt-1 flex flex-wrap gap-1">
+      {user.staff && <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700"><Headset className="h-3 w-3" /> {t("admin.users.staffPill")}</span>}
+      {user.tempAccess && <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700"><Hourglass className="h-3 w-3" /> {t("admin.users.tempPill")}</span>}
+    </span>
+  );
+}
+
 function StatusPill({ user }) {
   const { t } = useI18n();
   if (user.admin) return <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700"><ShieldCheck className="h-3.5 w-3.5" /> {t("admin.users.admin")}</span>;
@@ -245,14 +259,15 @@ function StatusPill({ user }) {
   return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {t("admin.users.active")}</span>;
 }
 
-function IconAction({ label, onClick, icon: Icon, danger }) {
+function IconAction({ label, onClick, icon: Icon, danger, active }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 ${danger ? "hover:text-rose-600" : "hover:text-slate-900"}`}
+      aria-pressed={active === undefined ? undefined : active}
+      className={`grid h-9 w-9 place-items-center rounded-lg transition hover:bg-slate-100 ${active ? "bg-brand-50 text-brand-700" : "text-slate-500"} ${danger ? "hover:text-rose-600" : "hover:text-slate-900"}`}
     >
       <Icon className="h-4 w-4" />
     </button>
@@ -301,6 +316,31 @@ function ResetModal({ user, onClose, onDone }) {
         <IconAction label={t("admin.users.generate")} icon={Wand2} onClick={() => setPassword(randomPassword())} />
         <IconAction label={copied ? t("admin.users.copied") : t("admin.users.copy")} icon={copied ? Check : Copy} onClick={copy} />
       </div>
+      {error && <p role="alert" className="mt-3 text-rose-600">{error}</p>}
+    </Modal>
+  );
+}
+
+function StaffModal({ user, onClose, onDone }) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const adding = !user.staff;
+  const run = async () => {
+    setBusy(true);
+    try { await adminApi.setStaff(user.id, adding); onDone(); } catch (e) { setError(errorText(e)); setBusy(false); }
+  };
+  return (
+    <Modal title={t(adding ? "admin.users.staffAddTitle" : "admin.users.staffRemoveTitle", { email: user.email })} onClose={onClose}
+      footer={<><Button variant="ghost" onClick={onClose}>{t("admin.users.cancel")}</Button><Button variant={adding ? "primary" : "danger"} onClick={run} disabled={busy}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t(adding ? "admin.users.staffAdd" : "admin.users.staffRemove")}</Button></>}>
+      <p>{t(adding ? "admin.users.staffAddText" : "admin.users.staffRemoveText")}</p>
+      {adding && (
+        <ul className="mt-3 space-y-1.5 text-sm">
+          {t("admin.users.staffCan").map((x) => <li key={x} className="flex gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />{x}</li>)}
+          {t("admin.users.staffCannot").map((x) => <li key={x} className="flex gap-2 text-slate-500"><X className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />{x}</li>)}
+        </ul>
+      )}
       {error && <p role="alert" className="mt-3 text-rose-600">{error}</p>}
     </Modal>
   );
@@ -422,6 +462,13 @@ function UsersTab({ toast }) {
     try { await adminApi.setSuspended(u.id, false); toast(t("admin.users.restoredToast", { email: u.email })); load(q); } catch (e) { toast(errorText(e)); }
   };
   const done = (msgKey, u) => () => { setDialog(null); toast(t(msgKey, { email: u.email })); load(q); };
+  const toggleTemp = async (u) => {
+    try {
+      await adminApi.setTempAccess(u.id, !u.tempAccess);
+      toast(t(u.tempAccess ? "admin.users.tempRemovedToast" : "admin.users.tempAddedToast", { email: u.email }));
+      load(q);
+    } catch (e) { toast(errorText(e)); }
+  };
 
   return (
     <div className="space-y-6">
@@ -473,12 +520,14 @@ function UsersTab({ toast }) {
                         <bdi dir="ltr">{u.admin ? "∞" : u.accounts ? `${u.accounts.used}/${u.accounts.max}` : "–"}</bdi>
                       </button>
                     </td>
-                    <td className="px-4 py-3"><StatusPill user={u} /></td>
+                    <td className="px-4 py-3"><StatusPill user={u} /><RolePills user={u} /></td>
                     <td className="px-4 py-2">
                       <div className="flex justify-end gap-0.5">
                         {!u.admin && (u.suspended
                           ? <IconAction label={t("admin.users.restore")} icon={UserCheck} onClick={() => restore(u)} />
                           : <IconAction label={t("admin.users.suspend")} icon={UserX} onClick={() => setDialog({ kind: "suspend", user: u })} />)}
+                        {!u.admin && <IconAction label={u.staff ? t("admin.users.staffRemove") : t("admin.users.staffAdd")} icon={Headset} active={u.staff} onClick={() => setDialog({ kind: "staff", user: u })} />}
+                        {!u.admin && <IconAction label={u.tempAccess ? t("admin.users.tempRemove") : t("admin.users.tempAdd")} icon={Hourglass} active={u.tempAccess} onClick={() => toggleTemp(u)} />}
                         <IconAction label={t("admin.users.linkedAction")} icon={Link2} onClick={() => setDialog({ kind: "linked", user: u })} />
                         <IconAction label={t("admin.users.accountsAction")} icon={Mails} onClick={() => setDialog({ kind: "accounts", user: u })} />
                         <IconAction label={t("admin.users.resetPassword")} icon={KeyRound} onClick={() => setDialog({ kind: "reset", user: u })} />
@@ -500,6 +549,7 @@ function UsersTab({ toast }) {
 
       {dialog?.kind === "suspend" && <SuspendModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.suspendedToast", dialog.user)} />}
       {dialog?.kind === "reset" && <ResetModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.resetDone", dialog.user)} />}
+      {dialog?.kind === "staff" && <StaffModal user={dialog.user} onClose={() => setDialog(null)} onDone={done(dialog.user.staff ? "admin.users.staffRemovedToast" : "admin.users.staffAddedToast", dialog.user)} />}
       {dialog?.kind === "linked" && <LinkedModal user={dialog.user} onClose={() => setDialog(null)} onPick={(email) => { setDialog(null); setQ(email.split("@")[0]); }} />}
       {dialog?.kind === "accounts" && <AccountsModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.accountsDone", dialog.user)} />}
       {dialog?.kind === "delete" && <DeleteModal user={dialog.user} onClose={() => setDialog(null)} onDone={done("admin.users.deletedToast", dialog.user)} />}
@@ -848,6 +898,20 @@ function SettingsTab({ toast }) {
       </Card>
 
       <Card className="p-5">
+        <h2 className="flex items-center gap-2 font-bold text-slate-900"><Hourglass className="h-4.5 w-4.5 text-violet-600" /> {t("admin.settings.tempTitle")}</h2>
+        <p className="mt-1 text-sm text-slate-500">{t("admin.settings.tempText")}</p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          {["off", "chosen", "all"].map((m) => (
+            <button key={m} type="button" aria-pressed={s.tempMode === m} disabled={saving} onClick={() => save({ tempMode: m })}
+              className={`rounded-xl border p-3 text-start transition ${s.tempMode === m ? "border-brand-600 bg-brand-50 ring-2 ring-brand-200" : "border-slate-300 hover:border-brand-400"}`}>
+              <span className="block text-sm font-bold text-slate-900">{t(`admin.settings.tempModes.${m}.title`)}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">{t(`admin.settings.tempModes.${m}.text`)}</span>
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="p-5">
         <h2 className="font-bold text-slate-900">{t("admin.settings.signupsTitle")}</h2>
         <div className="mt-4">
           <Toggle id="signups-open" checked={s.signupsOpen} disabled={saving} onChange={(v) => save({ signupsOpen: v })} label={t("admin.settings.signupsOpen")} description={t("admin.settings.signupsText")} />
@@ -883,13 +947,19 @@ export default function Admin() {
   const [toastMsg, setToastMsg] = useState("");
   const [openReports, setOpenReports] = useState(0);
   const [supportUnread, setSupportUnread] = useState(0);
+  const [staffOnly, setStaffOnly] = useState(false);
 
   useEffect(() => {
     if (!session) return;
     getMe().then((me) => {
-      setAllowed(!!me.isAdmin);
-      if (me.isAdmin) adminApi.reports("open").then((r) => setOpenReports(r.open)).catch(() => {});
-      if (me.isAdmin) adminApi.support("open").then((r) => setSupportUnread(r.unread)).catch(() => {});
+      const staff = !me.isAdmin && !!me.isStaff;
+      setAllowed(!!me.isAdmin || staff);
+      setStaffOnly(staff);
+      if (staff && !STAFF_TABS.includes(tab)) setTab("support");
+      if (me.isAdmin || staff) {
+        adminApi.reports("open").then((r) => setOpenReports(r.open)).catch(() => {});
+        adminApi.support("open").then((r) => setSupportUnread(r.unread)).catch(() => {});
+      }
     }).catch(() => setAllowed(false));
   }, [session?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -914,7 +984,7 @@ export default function Admin() {
 
   const nav = (
     <nav className="mt-8 space-y-1">
-      {TABS.map(({ id, icon: Icon }) => (
+      {TABS.filter(({ id }) => !staffOnly || STAFF_TABS.includes(id)).map(({ id, icon: Icon }) => (
         <button key={id} type="button" onClick={() => go(id)} aria-current={tab === id ? "page" : undefined}
           className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${tab === id ? "bg-white/12 text-white" : "text-white/65 hover:bg-white/6 hover:text-white"}`}>
           <Icon className="h-5 w-5" aria-hidden="true" /> <span className="flex-1 text-start">{t(`admin.nav.${id}`)}</span>
@@ -934,7 +1004,7 @@ export default function Admin() {
           <Link to="/" dir="ltr" className="flex items-center gap-2.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40" title={t("nav.home", { name: BRAND.name })}>
             <LogoMark size={34} />
             <span className="font-display text-lg font-extrabold tracking-[-0.03em]">{BRAND.short}</span>
-            <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#3b2800]">{t("admin.badge")}</span>
+            <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#3b2800]">{t(staffOnly ? "admin.staffBadge" : "admin.badge")}</span>
           </Link>
           <button type="button" onClick={() => setMenuOpen(false)} className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 lg:hidden" aria-label={t("compose.close")}><X className="h-5 w-5" /></button>
         </div>
@@ -952,7 +1022,7 @@ export default function Admin() {
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-surface/90 px-4 backdrop-blur sm:px-8">
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => setMenuOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label={t("admin.openMenu")}><Menu className="h-5 w-5" /></button>
-            <p className="font-semibold text-slate-900">{t("admin.title")}</p>
+            <p className="font-semibold text-slate-900">{t(staffOnly ? "admin.staffTitle" : "admin.title")}</p>
           </div>
           <Preferences />
         </header>
@@ -960,10 +1030,10 @@ export default function Admin() {
           {DEMO_MODE && (
             <p className="mb-6 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-800">{t("admin.previewData")}</p>
           )}
-          {tab === "overview" && <Overview go={go} />}
-          {tab === "users" && <UsersTab toast={toast} />}
-          {tab === "broadcast" && <BroadcastTab toast={toast} />}
-          {tab === "settings" && <SettingsTab toast={toast} />}
+          {!staffOnly && tab === "overview" && <Overview go={go} />}
+          {!staffOnly && tab === "users" && <UsersTab toast={toast} />}
+          {!staffOnly && tab === "broadcast" && <BroadcastTab toast={toast} />}
+          {!staffOnly && tab === "settings" && <SettingsTab toast={toast} />}
           {tab === "support" && <SupportTab toast={toast} onCount={setSupportUnread} />}
           {tab === "reports" && <ReportsTab toast={toast} onCount={setOpenReports} />}
         </main>

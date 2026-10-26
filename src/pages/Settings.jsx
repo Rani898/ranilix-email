@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { ArrowLeft, Bell, Camera, Check, KeyRound, Loader2, Smartphone, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, Camera, Check, KeyRound, Loader2, Palmtree, Smartphone, Trash2, UserRound } from "lucide-react";
 import { BRAND } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
 import SenderAvatar from "../components/SenderAvatar.jsx";
 import FormField from "../components/FormField.jsx";
 import Preferences from "../components/Preferences.jsx";
 import InstallDialog from "../components/InstallDialog.jsx";
-import { Button, Modal } from "../components/ui.jsx";
+import { Button, Modal, Toggle } from "../components/ui.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { bumpAvatars } from "../lib/avatars.js";
 import { enablePush, pushSupported, unlinkPush, useInstall } from "../lib/pwa.js";
 import { passwordChecks, PASSWORD_MIN } from "../lib/validation.js";
-import { AuthError, changePassword, deleteAccount, getMe, getProfile, logOut, removeAvatar, setAvatar, updateProfile } from "../lib/api.js";
+import { AuthError, changePassword, deleteAccount, getAutoReply, getMe, getProfile, logOut, removeAvatar, saveAutoReply, setAvatar, updateProfile } from "../lib/api.js";
 
 /** Square-crop and shrink a picture to 256px JPEG in the browser (keeps uploads small). */
 function toAvatarDataUrl(file) {
@@ -229,6 +229,107 @@ function PasswordSection({ onAuth }) {
   );
 }
 
+/* ---------- Auto-reply ---------- */
+
+// <input type="date"> works with local days: the start is that day's 00:00, the end is the end of that day.
+const toDay = (ts) => {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const fromDay = (v, end = false) => {
+  if (!v) return null;
+  const [y, m, d] = v.split("-").map(Number);
+  return new Date(y, m - 1, d + (end ? 1 : 0)).getTime() - (end ? 1 : 0);
+};
+
+function AutoReplySection({ onAuth }) {
+  const { t, locale } = useI18n();
+  const errorText = useErrorText();
+  const [data, setData] = useState(null);
+  const [enabled, setEnabled] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const presets = t("settings.autoReply.presets");
+
+  useEffect(() => {
+    getAutoReply().then((ar) => {
+      setData(ar); setEnabled(ar.enabled); setSubject(ar.subject); setBody(ar.body); setStart(toDay(ar.startsAt)); setEnd(toDay(ar.endsAt));
+      if (window.location.hash === "#auto-reply") setTimeout(() => document.getElementById("auto-reply")?.scrollIntoView({ behavior: "smooth" }), 50);
+    }).catch((e) => { if (e instanceof AuthError) onAuth(); else setData({}); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async (nextEnabled = enabled) => {
+    setBusy(true); setError("");
+    try {
+      const ar = await saveAutoReply({ enabled: nextEnabled, subject, body, startsAt: fromDay(start), endsAt: fromDay(end, true) });
+      setData(ar); setEnabled(ar.enabled);
+      setSaved(true); setTimeout(() => setSaved(false), 4000);
+    } catch (err) {
+      if (err instanceof AuthError) return onAuth();
+      setError(errorText(err));
+      setEnabled(data?.enabled || false);
+    } finally { setBusy(false); }
+  };
+
+  const now = Date.now();
+  const s = fromDay(start); const e2 = fromDay(end, true);
+  const fmt = (ts) => new Date(ts).toLocaleDateString(locale, { day: "numeric", month: "long" });
+  let status = null;
+  if (data?.enabled) {
+    if (data.endsAt && data.endsAt <= now) status = { tone: "slate", text: t("settings.autoReply.ended") };
+    else if (data.startsAt && data.startsAt > now) status = { tone: "amber", text: t("settings.autoReply.scheduled", { date: fmt(data.startsAt) }) };
+    else status = { tone: "emerald", text: data.endsAt ? t("settings.autoReply.activeUntil", { date: fmt(data.endsAt) }) : t("settings.autoReply.active") };
+  }
+  const tones = { emerald: "bg-emerald-50 text-emerald-700", amber: "bg-amber-50 text-amber-800", slate: "bg-slate-100 text-slate-600" };
+
+  return (
+    <div id="auto-reply" className="scroll-mt-24">
+      <Section icon={Palmtree} title={t("settings.autoReply.title")} desc={t("settings.autoReply.desc")}>
+        {!data ? <Loader2 className="h-5 w-5 animate-spin text-slate-400" /> : (
+          <div className="space-y-4">
+            <Toggle id="ar-enabled" checked={enabled} disabled={busy} onChange={(v) => { setEnabled(v); if (!v || body.trim()) save(v); }}
+              label={t("settings.autoReply.toggle")} description={t("settings.autoReply.toggleHint")} />
+            {status && <p className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${tones[status.tone]}`}>{status.text}</p>}
+            <div>
+              <p className="text-sm font-semibold text-slate-800">{t("settings.autoReply.quick")}</p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {presets.map((p) => (
+                  <button key={p.label} type="button" onClick={() => { setBody(p.body); if (!subject) setSubject(p.subject); }}
+                    className="rounded-full border border-slate-300 bg-surface px-3 py-1.5 text-sm text-slate-700 hover:border-brand-400 hover:text-brand-700">{p.label}</button>
+                ))}
+              </div>
+            </div>
+            <FormField id="ar-subject" label={t("settings.autoReply.subject")} placeholder={t("settings.autoReply.subjectPlaceholder")} value={subject} maxLength={150} onChange={(e) => setSubject(e.target.value)} />
+            <div>
+              <label htmlFor="ar-body" className="block text-sm font-semibold text-slate-800">{t("settings.autoReply.message")}</label>
+              <textarea id="ar-body" rows={5} dir="auto" maxLength={4000} value={body} onChange={(e) => setBody(e.target.value)} placeholder={t("settings.autoReply.messagePlaceholder")}
+                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-surface px-4 py-3 text-base text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField id="ar-start" type="date" label={t("settings.autoReply.from")} hint={t("settings.autoReply.optional")} value={start} onChange={(e) => setStart(e.target.value)} />
+              <FormField id="ar-end" type="date" label={t("settings.autoReply.until")} hint={t("settings.autoReply.optional")} value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)}
+                error={s && e2 && e2 <= s ? t("errors.autoreply_dates") : ""} />
+            </div>
+            <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-600">{t("settings.autoReply.rules")}</p>
+            {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={() => save(enabled)} disabled={busy || (enabled && !body.trim())}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}{t("settings.save")}</Button>
+              <SavedNote show={saved} text={t("settings.saved")} />
+            </div>
+          </div>
+        )}
+      </Section>
+    </div>
+  );
+}
+
 /* ---------- Delete account ---------- */
 
 function DeleteSection({ email, isAdmin, onDeleted, onAuth }) {
@@ -335,6 +436,7 @@ function Settings({ email }) {
         ) : (
           <>
             <ProfileSection email={email} profile={profile} onChange={setProfile} onAuth={onAuth} />
+            <AutoReplySection onAuth={onAuth} />
             <AppSection />
             <PasswordSection onAuth={onAuth} />
             <DeleteSection email={email} isAdmin={isAdmin} onDeleted={onDeleted} onAuth={onAuth} />

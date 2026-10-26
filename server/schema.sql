@@ -184,3 +184,43 @@ CREATE TABLE IF NOT EXISTS support_messages (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_support_msgs ON support_messages(thread_id, id);
+
+-- Auto-reply ("out of office"). One reply per sender every few days (auto_reply_log).
+CREATE TABLE IF NOT EXISTS auto_replies (
+  user_id    INTEGER PRIMARY KEY,
+  enabled    INTEGER NOT NULL DEFAULT 0,
+  subject    TEXT,
+  body       TEXT,
+  starts_at  INTEGER,
+  ends_at    INTEGER,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auto_reply_log (
+  user_id INTEGER NOT NULL,
+  sender  TEXT NOT NULL,
+  sent_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, sender)
+);
+-- Temporary addresses (tmp-xxxxxxxx@domain) that deliver to their owner's inbox until they expire.
+CREATE TABLE IF NOT EXISTS temp_addresses (
+  local      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  label      TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  received   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_temp_user ON temp_addresses(user_id, expires_at);
+-- Who may create temporary addresses when the admin picked "chosen people".
+CREATE TABLE IF NOT EXISTS temp_access (
+  user_id    INTEGER PRIMARY KEY,
+  granted_by TEXT,
+  granted_at INTEGER NOT NULL
+);
+-- Support team: people who can answer support chats and reports without being full admins.
+CREATE TABLE IF NOT EXISTS staff_roles (
+  user_id    INTEGER PRIMARY KEY,
+  role       TEXT NOT NULL,
+  granted_by TEXT,
+  granted_at INTEGER NOT NULL
+);

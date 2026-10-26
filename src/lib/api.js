@@ -145,7 +145,12 @@ const live = {
 // Account info + site announcement
 demo.getMe = async () => {
   const email = demoEmail();
-  return { email, isAdmin: email?.split("@")[0] === "rani", accounts: { used: getAccounts().length, max: 5 }, profile: await demo.getProfile() };
+  const ar = await demo.getAutoReply();
+  const now = Date.now();
+  return {
+    email, isAdmin: email?.split("@")[0] === "rani", isStaff: false, accounts: { used: getAccounts().length, max: 5 }, profile: await demo.getProfile(),
+    tempAllowed: true, autoReplyOn: !!(ar.enabled && ar.body && (!ar.startsAt || ar.startsAt <= now) && (!ar.endsAt || ar.endsAt > now)),
+  };
 };
 demo.getAnnouncement = async () => {
   try {
@@ -229,6 +234,49 @@ demo.supportStart = async (payload) => supportDemo.start(demoEmail(), payload);
 demo.supportSend = async (id, message) => supportDemo.send(demoEmail(), id, message);
 demo.supportRate = async (id, rating) => supportDemo.rate(demoEmail(), id, rating);
 
+// Auto-reply and temporary addresses
+live.getAutoReply = () => request("/api/auto-reply", { auth: true });
+live.saveAutoReply = (data) => request("/api/auto-reply", { method: "PUT", body: data, auth: true });
+live.tempList = () => request("/api/temp", { auth: true });
+live.tempCreate = (hours, label) => request("/api/temp", { method: "POST", body: { hours, label }, auth: true });
+live.tempExtend = (address, hours) => request(`/api/temp/${encodeURIComponent(address.split("@")[0])}/extend`, { method: "POST", body: { hours }, auth: true });
+live.tempDelete = (address) => request(`/api/temp/${encodeURIComponent(address.split("@")[0])}`, { method: "DELETE", auth: true });
+
+const demoKey = (k) => `ranilix.demo.${k}.${demoEmail()}`;
+const demoRead = (k, fallback) => { try { return JSON.parse(localStorage.getItem(demoKey(k)) || "null") ?? fallback; } catch { return fallback; } };
+const demoWrite = (k, v) => { try { localStorage.setItem(demoKey(k), JSON.stringify(v)); } catch { /* ignore */ } };
+demo.getAutoReply = async () => demoRead("autoreply", { enabled: false, subject: "", body: "", startsAt: null, endsAt: null, updatedAt: 0 });
+demo.saveAutoReply = async (d) => {
+  await delay(300);
+  if (d.enabled && String(d.body || "").trim().length < 2) throw new ApiError("", "autoreply_empty");
+  if (d.startsAt && d.endsAt && d.endsAt <= d.startsAt) throw new ApiError("", "autoreply_dates");
+  const v = { enabled: !!d.enabled, subject: String(d.subject || ""), body: String(d.body || "").trim(), startsAt: d.startsAt || null, endsAt: d.endsAt || null, updatedAt: Date.now() };
+  demoWrite("autoreply", v);
+  return v;
+};
+const demoTemps = () => demoRead("temp", []).filter((a) => a.expiresAt > Date.now());
+demo.tempList = async () => ({ allowed: true, max: 5, addresses: demoTemps().sort((a, b) => b.createdAt - a.createdAt) });
+demo.tempCreate = async (hours, label) => {
+  await delay(300);
+  const list = demoTemps();
+  if (list.length >= 5) throw new ApiError("", "temp_limit", { max: 5 });
+  const abc = "abcdefghijkmnpqrstuvwxyz23456789";
+  const local = `tmp-${Array.from({ length: 8 }, () => abc[Math.floor(Math.random() * abc.length)]).join("")}`;
+  const now = Date.now();
+  const a = { address: `${local}@${BRAND.domain}`, label: String(label || "").slice(0, 40), createdAt: now, expiresAt: now + hours * 3600 * 1000, received: 0 };
+  demoWrite("temp", [a, ...list]);
+  return a;
+};
+demo.tempExtend = async (address, hours) => {
+  const list = demoTemps();
+  const a = list.find((x) => x.address === address);
+  if (!a) throw new ApiError("", "temp_not_found");
+  a.expiresAt = Math.min(Math.max(Date.now(), a.expiresAt) + hours * 3600 * 1000, Date.now() + 30 * 24 * 3600 * 1000);
+  demoWrite("temp", list);
+  return a;
+};
+demo.tempDelete = async (address) => { demoWrite("temp", demoTemps().filter((x) => x.address !== address)); return { ok: true }; };
+
 const api = DEMO_MODE ? demo : live;
 
 export const {
@@ -239,4 +287,5 @@ export const {
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
+  getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
 } = api;

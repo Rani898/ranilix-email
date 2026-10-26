@@ -16,6 +16,8 @@ const live = {
   setSuspended: (id, suspended) => request(`/api/admin/users/${id}/suspend`, { method: "POST", body: { suspended }, auth: true }),
   resetPassword: (id, password) => request(`/api/admin/users/${id}/password`, { method: "POST", body: { password }, auth: true }),
   setAccountLimit: (id, max) => request(`/api/admin/users/${id}/accounts`, { method: "PUT", body: { max }, auth: true }),
+  setStaff: (id, support) => request(`/api/admin/users/${id}/staff`, { method: "PUT", body: { support }, auth: true }),
+  setTempAccess: (id, allowed) => request(`/api/admin/users/${id}/temp`, { method: "PUT", body: { allowed }, auth: true }),
   deleteUser: (id, confirm) => request(`/api/admin/users/${id}`, { method: "DELETE", body: { confirm }, auth: true }),
   broadcasts: () => request("/api/admin/broadcasts", { auth: true }),
   discord: () => request("/api/admin/discord", { auth: true }),
@@ -178,14 +180,17 @@ const demo = {
     }
     return { ok: true, recipients, test: !!test };
   },
-  async settings() { await delay(150); return load().settings; },
+  async settings() { await delay(150); return { tempMode: "chosen", ...load().settings }; },
+  async setStaff(id, support) { const s = load(); const u = s.users.find((x) => x.id === id); if (u) u.staff = !!support; save(s); return { ok: true, staff: !!support }; },
+  async setTempAccess(id, allowed) { const s = load(); const u = s.users.find((x) => x.id === id); if (u) u.tempAccess = !!allowed; save(s); return { ok: true, tempAccess: !!allowed }; },
   async saveSettings(patch) {
     const s = load();
     if (typeof patch.signupsOpen === "boolean") s.settings.signupsOpen = patch.signupsOpen;
     if (typeof patch.outboundEnabled === "boolean") s.settings.outboundEnabled = patch.outboundEnabled;
     if (patch.announcement) s.settings.announcement = { ...s.settings.announcement, ...patch.announcement };
+    if (["off", "chosen", "all"].includes(patch.tempMode)) s.settings.tempMode = patch.tempMode;
     save(s);
-    return s.settings;
+    return { tempMode: "chosen", ...s.settings };
   },
 };
 

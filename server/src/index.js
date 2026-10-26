@@ -8,6 +8,7 @@ import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
 import { supportAdminRoute, supportRoute } from "./support.js";
+import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAutoReply, tempAllowed, tempOwner, tempRoute } from "./extras.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
@@ -302,10 +303,16 @@ async function getSettings(env) {
     outboundEnabled: s.outbound_enabled !== "0",
     outboundConfigured: !!env.RESEND_API_KEY,
     announcement: { enabled: s.announcement_enabled === "1", text: s.announcement_text || "", level: s.announcement_level || "info" },
+    tempMode: ["off", "chosen", "all"].includes(s.temp_mode) ? s.temp_mode : "chosen",
   };
 }
 const setSetting = (env, key, value) =>
   env.DB.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, String(value)).run();
+
+/** Support team members (staff_roles) can use the Support and Reports tabs of the admin panel. */
+const isStaff = async (env, userId) =>
+  !!(await env.DB.prepare("SELECT 1 FROM staff_roles WHERE user_id = ? AND role = 'support'").bind(userId).first());
+const STAFF_PATHS = /^\/api\/admin\/(support(-settings)?|reports)(\/|$)/;
 
 const isSuspended = async (env, userId) =>
   !!(await env.DB.prepare("SELECT 1 FROM user_meta WHERE user_id = ? AND suspended = 1").bind(userId).first());
@@ -325,6 +332,11 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM discord_links WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM support_messages WHERE thread_id IN (SELECT id FROM support_threads WHERE user_id = ?)").bind(userId),
     env.DB.prepare("DELETE FROM support_threads WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM auto_replies WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM auto_reply_log WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM temp_addresses WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM temp_access WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM staff_roles WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
@@ -401,9 +413,18 @@ async function adminRoute(req, env, admin, path, url, log) {
       const { results: lim } = await env.DB.prepare(`SELECT owner_id, max_accounts FROM account_limits WHERE owner_id IN (${marks})`).bind(...owners).all();
       for (const r of lim) limits.set(r.owner_id, r.max_accounts);
     }
+    const ids = results.map((u) => u.id);
+    const staffSet = new Set();
+    const tempSet = new Set();
+    if (ids.length) {
+      const marks = ids.map(() => "?").join(",");
+      for (const r of (await env.DB.prepare(`SELECT user_id FROM staff_roles WHERE user_id IN (${marks})`).bind(...ids).all()).results) staffSet.add(r.user_id);
+      for (const r of (await env.DB.prepare(`SELECT user_id FROM temp_access WHERE user_id IN (${marks})`).bind(...ids).all()).results) tempSet.add(r.user_id);
+    }
     return json({
       total: total.n,
       users: results.map((u) => ({
+        staff: staffSet.has(u.id), tempAccess: tempSet.has(u.id),
         id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
         accounts: { used: used.get(u.owner_id) || 1, max: limits.get(u.owner_id) ?? DEFAULT_ACCOUNTS },
@@ -412,12 +433,34 @@ async function adminRoute(req, env, admin, path, url, log) {
     });
   }
 
-  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password|accounts))?$/);
+  const userMatch = path.match(/^\/api\/admin\/users\/(\d+)(?:\/(suspend|password|accounts|staff|temp))?$/);
   if (userMatch) {
     const id = Number(userMatch[1]);
     const target = await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(id).first();
     if (!target) throw new HttpError(404, "Not found.", "not_found");
     const protectedUser = isAdmin(env, target.username);
+
+    if (userMatch[2] === "staff" && req.method === "PUT") {
+      const { support } = await readJson(req);
+      if (support) {
+        await env.DB.prepare("INSERT INTO staff_roles (user_id, role, granted_by, granted_at) VALUES (?, 'support', ?, ?) ON CONFLICT(user_id) DO UPDATE SET role = 'support'")
+          .bind(id, admin.email, Date.now()).run();
+      } else {
+        await env.DB.prepare("DELETE FROM staff_roles WHERE user_id = ?").bind(id).run();
+      }
+      log("admin", support ? "🎧 נוסף לצוות התמיכה" : "🎧 הוסר מצוות התמיכה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}` });
+      return json({ ok: true, staff: !!support });
+    }
+    if (userMatch[2] === "temp" && req.method === "PUT") {
+      const { allowed } = await readJson(req);
+      if (allowed) {
+        await env.DB.prepare("INSERT OR IGNORE INTO temp_access (user_id, granted_by, granted_at) VALUES (?, ?, ?)").bind(id, admin.email, Date.now()).run();
+      } else {
+        await env.DB.prepare("DELETE FROM temp_access WHERE user_id = ?").bind(id).run();
+      }
+      log("admin", allowed ? "⏳ קיבל גישה לכתובות זמניות" : "⏳ הגישה לכתובות זמניות הוסרה", { "מנהל": admin.email, "משתמש": `${target.username}@${env.MAIL_DOMAIN}` });
+      return json({ ok: true, tempAccess: !!allowed });
+    }
 
     if (userMatch[2] === "suspend" && req.method === "POST") {
       const { suspended } = await readJson(req);
@@ -547,6 +590,7 @@ async function adminRoute(req, env, admin, path, url, log) {
     const body = await readJson(req);
     if (typeof body.signupsOpen === "boolean") await setSetting(env, "signups_open", body.signupsOpen ? "1" : "0");
     if (typeof body.outboundEnabled === "boolean") await setSetting(env, "outbound_enabled", body.outboundEnabled ? "1" : "0");
+    if (["off", "chosen", "all"].includes(body.tempMode)) await setSetting(env, "temp_mode", body.tempMode);
     if (body.announcement) {
       const a = body.announcement;
       if (typeof a.enabled === "boolean") await setSetting(env, "announcement_enabled", a.enabled ? "1" : "0");
@@ -555,7 +599,8 @@ async function adminRoute(req, env, admin, path, url, log) {
     }
     const changed = [typeof body.signupsOpen === "boolean" && `הרשמה: ${body.signupsOpen ? "פתוחה" : "סגורה"}`,
       typeof body.outboundEnabled === "boolean" && `שליחה חיצונית: ${body.outboundEnabled ? "פעילה" : "כבויה"}`,
-      body.announcement && `באנר: ${body.announcement.enabled ? "מוצג" : "מוסתר"}`].filter(Boolean).join(" · ");
+      body.announcement && `באנר: ${body.announcement.enabled ? "מוצג" : "מוסתר"}`,
+      body.tempMode && `כתובות זמניות: ${{ off: "כבוי", chosen: "לאנשים שנבחרו", all: "לכולם" }[body.tempMode] || ""}`].filter(Boolean).join(" · ");
     log("admin", "⚙️ הגדרות האתר שונו", { "מנהל": admin.email, "מה השתנה": changed });
     return json(await getSettings(env));
   }
@@ -566,6 +611,8 @@ async function adminRoute(req, env, admin, path, url, log) {
 /* ------------------------------------------------------------------ */
 /* Routes                                                              */
 /* ------------------------------------------------------------------ */
+
+const arHelpers = (log) => ({ insertMessage, notifyUser, rateLimit, getSettings, log, outboundGlobal: OUTBOUND_GLOBAL_DAY });
 
 async function route(req, env, log) {
   const url = new URL(req.url);
@@ -582,7 +629,7 @@ async function route(req, env, log) {
 
   if (path === "/api/username-available" && req.method === "GET") {
     const u = (url.searchParams.get("u") || "").toLowerCase();
-    if (validateUsername(u) || RESERVED.has(u) || isAdmin(env, u)) return json({ available: false });
+    if (validateUsername(u) || RESERVED.has(u) || TEMP_PREFIX_RE.test(u) || isAdmin(env, u)) return json({ available: false });
     const row = await env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(u).first();
     return json({ available: !row });
   }
@@ -593,7 +640,7 @@ async function route(req, env, log) {
     const uErr = validateUsername(u);
     if (uErr) throw new HttpError(400, uErr);
     // Reserved names, and names listed as admins (so nobody can register an admin name that's free).
-    if (RESERVED.has(u) || isAdmin(env, u)) {
+    if (RESERVED.has(u) || TEMP_PREFIX_RE.test(u) || isAdmin(env, u)) {
       if (isAdmin(env, u)) log("security", "🚫 ניסיון להירשם בשם של מנהל", { "שם": u, "מדינה": country });
       throw new HttpError(409, "Sorry, that name is taken. Try another.", "name_taken");
     }
@@ -710,7 +757,26 @@ async function route(req, env, log) {
 
   if (path === "/api/me" && req.method === "GET") {
     const accounts = await groupInfo(env, await ownerOf(env, user.id));
-    return json({ email: user.email, isAdmin: isAdmin(env, user.username), accounts, profile: await getProfile(env, user.id) });
+    const admin = isAdmin(env, user.username);
+    return json({
+      email: user.email, isAdmin: admin, isStaff: !admin && (await isStaff(env, user.id)), accounts, profile: await getProfile(env, user.id),
+      tempAllowed: await tempAllowed(env, user, admin), autoReplyOn: autoReplyActive(await getAutoReply(env, user.id)),
+    });
+  }
+
+  /* ---- Auto-reply ---- */
+  if (path === "/api/auto-reply" && req.method === "GET") return json(await getAutoReply(env, user.id));
+  if (path === "/api/auto-reply" && req.method === "PUT") {
+    const before = await getAutoReply(env, user.id);
+    const saved = await saveAutoReply(env, user.id, await readJson(req), HttpError);
+    if (before.enabled !== saved.enabled) log("accounts", saved.enabled ? "🏖️ הפעיל מענה אוטומטי" : "🏖️ כיבה מענה אוטומטי", { "כתובת": user.email });
+    return json(saved);
+  }
+
+  /* ---- Temporary addresses ---- */
+  if (path.startsWith("/api/temp")) {
+    const res = await tempRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
+    if (res) return res;
   }
 
   // Cheap "anything new?" check the inbox calls every few seconds (reads a single row).
@@ -808,7 +874,9 @@ async function route(req, env, log) {
   }
 
   if (path.startsWith("/api/admin/")) {
-    if (!isAdmin(env, user.username)) {
+    const fullAdmin = isAdmin(env, user.username);
+    if (!fullAdmin && STAFF_PATHS.test(path) && (await isStaff(env, user.id))) return adminRoute(req, env, user, path, url, log);
+    if (!fullAdmin) {
       log("security", "🕵️ משתמש רגיל ניסה לגשת לפאנל הניהול", { "כתובת": user.email, "נתיב": path, "מדינה": country });
       throw new HttpError(404, "Not found.", "not_found"); // don't reveal the panel exists
     }
@@ -959,6 +1027,9 @@ async function route(req, env, log) {
       await linkAttachments(env, id, inboxId, stored);
       await notifyUser(env, id);
     }
+    // Recipients who are away answer automatically (in the background, so sending stays fast).
+    const arWork = Promise.all(ids.map((id, i) => maybeAutoReply(env, arHelpers(log), { userId: id, userEmail: internal[i], sender: user.email, subject: msg.subject })));
+    if (log.ctx?.waitUntil) log.ctx.waitUntil(arWork); else await arWork;
     log("mail", "📤 מייל נשלח", { "מאת": user.email, "נמענים ב-Ranilix": internal.length, "נמענים חיצוניים": external.length, "קבצים": stored.length });
     return json({ ok: true }, 201);
   }
@@ -1014,7 +1085,16 @@ export default {
     const [local, domain] = to.split("@");
     if (domain !== env.MAIL_DOMAIN) return message.setReject("Unknown domain");
 
-    const user = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(local).first();
+    let user = await env.DB.prepare("SELECT id, username FROM users WHERE username = ?").bind(local).first();
+    // Temporary addresses deliver to their owner until they expire.
+    let isTemp = false;
+    if (!user) {
+      const ownerId = await tempOwner(env, local);
+      if (ownerId) {
+        user = await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(ownerId).first();
+        isTemp = !!user;
+      }
+    }
     if (!user || (await isSuspended(env, user.id))) return message.setReject("Address not found");
     if (message.rawSize > MAX_INBOUND_BYTES) return message.setReject("Message too large");
 
@@ -1065,7 +1145,14 @@ export default {
     });
     await linkAttachments(env, user.id, messageId, kept);
     await notifyUser(env, user.id);
-    log("mail", "📥 מייל התקבל", { "אל": to, "שולח (דומיין)": (fromAddr.split("@")[1] || "?").slice(0, 80), "קבצים": kept.length });
+    // Never auto-answer mail sent to a temporary address (that would reveal the real one).
+    if (!isTemp) {
+      ctx.waitUntil(maybeAutoReply(env, arHelpers(log), {
+        userId: user.id, userEmail: `${user.username}@${env.MAIL_DOMAIN}`, sender: fromAddr, subject: parsed.subject,
+        headers: (k) => message.headers?.get?.(k) || "",
+      }));
+    }
+    log("mail", isTemp ? "📥 מייל התקבל בכתובת זמנית" : "📥 מייל התקבל", { "אל": isTemp ? "כתובת זמנית" : to, "שולח (דומיין)": (fromAddr.split("@")[1] || "?").slice(0, 80), "קבצים": kept.length });
   },
 
   // Daily cleanup of expired sessions and old rate-limit rows
@@ -1074,5 +1161,7 @@ export default {
     await env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now).run();
     await env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - DAY).run();
     await env.DB.prepare("DELETE FROM oauth_states WHERE created_at < ?").bind(now - DAY).run();
+    await env.DB.prepare("DELETE FROM temp_addresses WHERE expires_at < ?").bind(now - 7 * DAY).run();
+    await env.DB.prepare("DELETE FROM auto_reply_log WHERE sent_at < ?").bind(now - 30 * DAY).run();
   },
 };

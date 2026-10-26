@@ -6,6 +6,9 @@ import {
   BellOff,
   BellRing,
   Forward,
+  Headset,
+  Hourglass,
+  Palmtree,
   Inbox as InboxIcon,
   Loader2,
   Mail,
@@ -34,7 +37,9 @@ import LinkifiedText from "../components/LinkifiedText.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { enablePush, syncPush, unlinkPush } from "../lib/pwa.js";
-import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getMe, listMessages, logOut, sendMessage, updateMessage } from "../lib/api.js";
+import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getAutoReply, getMe, listMessages, logOut, saveAutoReply, sendMessage, updateMessage } from "../lib/api.js";
+
+const TEMP_TO = /(^|[\s,;])tmp-[a-z0-9]{8}@/i;
 
 // New-mail check: every few seconds while the tab is visible, once a minute in the background.
 const CHECK_VISIBLE_MS = 5_000;
@@ -109,6 +114,9 @@ function Inbox() {
   const [permission, setPermission] = useState(notificationsSupported ? Notification.permission : "unsupported");
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
+  const [autoReplyOn, setAutoReplyOn] = useState(false);
+  const [tempAllowed, setTempAllowed] = useState(false);
   const [usage, setUsage] = useState(null); // { used, max } addresses for this person
   const [profile, setProfile] = useState(null); // { displayName, signature }
   const [params, setParams] = useSearchParams();
@@ -194,7 +202,7 @@ function Inbox() {
   // Admin link (only shown to admins; the server still checks every admin request) + site banner.
   useEffect(() => {
     if (!email) return;
-    getMe().then((me) => { setIsAdmin(!!me.isAdmin); if (me.accounts) setUsage(me.accounts); if (me.profile) setProfile(me.profile); }).catch(() => {});
+    getMe().then((me) => { setIsAdmin(!!me.isAdmin); setIsStaff(!!me.isStaff); setAutoReplyOn(!!me.autoReplyOn); setTempAllowed(!!me.tempAllowed); if (me.accounts) setUsage(me.accounts); if (me.profile) setProfile(me.profile); }).catch(() => {});
     syncPush();
     getAnnouncement().then((a) => {
       let dismissed = "";
@@ -321,12 +329,27 @@ function Inbox() {
               <ShieldCheck className="h-4 w-4 text-brand-600" /> <span className="hidden md:inline">{t("inbox.adminPanel")}</span>
             </Link>
           )}
+          {isStaff && (
+            <Link to="/admin#support" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100" title={t("inbox.supportPanel")} aria-label={t("inbox.supportPanel")}>
+              <Headset className="h-4 w-4 text-brand-600" /> <span className="hidden md:inline">{t("inbox.supportPanel")}</span>
+            </Link>
+          )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
-          <AccountMenu email={email} onLogout={logout} usage={isAdmin ? null : usage} displayName={profile?.displayName} />
+          <AccountMenu email={email} onLogout={logout} usage={isAdmin ? null : usage} displayName={profile?.displayName} tempAllowed={tempAllowed} />
         </div>
       </header>
 
+      {autoReplyOn && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 sm:px-6">
+          <Palmtree className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 font-medium">{t("inbox.autoReplyOn")}</span>
+          <Link to="/settings#auto-reply" className="font-semibold underline-offset-2 hover:underline">{t("inbox.autoReplyEdit")}</Link>
+          <button type="button" onClick={async () => {
+            try { const ar = await getAutoReply(); await saveAutoReply({ ...ar, enabled: false }); setAutoReplyOn(false); setToast(t("inbox.autoReplyOff")); } catch (e) { setToast(errorText(e)); }
+          }} className="rounded-lg bg-amber-200/70 px-2.5 py-1 font-semibold hover:bg-amber-200">{t("inbox.autoReplyTurnOff")}</button>
+        </div>
+      )}
       {banner && <AnnouncementBanner text={banner.text} level={banner.level} onDismiss={dismissBanner} dismissLabel={t("inbox.dismiss")} />}
 
       <div className="flex min-h-0 flex-1">
@@ -464,6 +487,7 @@ function Inbox() {
                         <span className="flex items-center gap-1.5">
                           <span dir="auto" className={`truncate text-sm ${m.read ? "text-slate-700" : "font-semibold text-slate-900"}`}>{m.subject}</span>
                           {m.attachments?.length > 0 && <Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-label={t("inbox.hasAttachments")} />}
+                          {m.folder !== "sent" && TEMP_TO.test(m.to || "") && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700"><Hourglass className="h-3 w-3" aria-hidden="true" />{t("temp.chip")}</span>}
                         </span>
                         <span dir="auto" className="block truncate text-sm text-slate-500">{m.body.replace(/\n+/g, " ")}</span>
                       </span>
@@ -511,6 +535,9 @@ function Inbox() {
                   <p className="truncate text-sm text-slate-500">
                     {t("inbox.toLine", { to: open.to === email ? t("inbox.me") : <bdi dir="ltr">{open.to}</bdi> })} · {longDate(open.date)}
                   </p>
+                  {open.folder !== "sent" && TEMP_TO.test(open.to || "") && (
+                    <p className="mt-1 inline-flex items-center gap-1 rounded-lg bg-violet-50 px-2 py-1 text-xs text-violet-800"><Hourglass className="h-3.5 w-3.5" aria-hidden="true" />{t("temp.receivedNote")}</p>
+                  )}
                 </div>
               </div>
               <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]"><LinkifiedText text={open.body} /></div>
