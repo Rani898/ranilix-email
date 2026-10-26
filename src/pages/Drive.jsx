@@ -263,12 +263,29 @@ function Drive({ email }) {
   const uploadFiles = async (files) => {
     const list = [...files];
     if (!list.length) return;
-    const queued = list.map((f) => ({ key: `${Date.now()}-${Math.random()}`, name: f.name, size: f.size, progress: 0, error: "", done: false, file: f }));
+    const queued = list.map((f) => ({ key: `${Date.now()}-${Math.random()}`, name: f.name, size: f.size, progress: 0, error: "", done: false, started: false, speed: 0, eta: null, file: f }));
     setUploads((u) => [...u.filter((x) => !x.done || x.error), ...queued]);
     for (const q of queued) {
+      // Speed = bytes sent over the last few seconds; updates the panel about 4 times a second.
+      const samples = [{ t: performance.now(), b: 0 }];
+      let lastPaint = 0;
+      const onProgress = (p) => {
+        const now = performance.now();
+        const sent = p * q.size;
+        samples.push({ t: now, b: sent });
+        while (samples.length > 2 && now - samples[0].t > 5000) samples.shift();
+        if (now - lastPaint < 250 && p < 1) return;
+        lastPaint = now;
+        const first = samples[0];
+        const secs = (now - first.t) / 1000;
+        const speed = secs > 0.3 ? (sent - first.b) / secs : 0;
+        const eta = speed > 0 ? (q.size - sent) / speed : null;
+        setUploads((u) => u.map((x) => (x.key === q.key ? { ...x, progress: p, speed, eta } : x)));
+      };
+      setUploads((u) => u.map((x) => (x.key === q.key ? { ...x, started: true } : x)));
       try {
-        await driveUpload(q.file, folder, (p) => setUploads((u) => u.map((x) => (x.key === q.key ? { ...x, progress: p } : x))));
-        setUploads((u) => u.map((x) => (x.key === q.key ? { ...x, progress: 1, done: true } : x)));
+        await driveUpload(q.file, folder, onProgress);
+        setUploads((u) => u.map((x) => (x.key === q.key ? { ...x, progress: 1, done: true, speed: 0, eta: null } : x)));
       } catch (e) {
         if (e instanceof AuthError) return onAuth();
         setUploads((u) => u.map((x) => (x.key === q.key ? { ...x, error: errorText(e), done: true } : x)));
@@ -410,7 +427,7 @@ function Drive({ email }) {
       </main>
 
       {uploads.length > 0 && (
-        <div className="fixed bottom-5 left-5 z-40 w-[min(22rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-surface shadow-xl">
+        <div className="fixed bottom-5 left-5 z-40 w-[min(24rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-surface shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
             <p className="text-sm font-bold text-slate-900">{t("drive.uploads", { done: uploads.filter((u) => u.done && !u.error).length, n: uploads.length })}</p>
             <button type="button" onClick={() => setUploads([])} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100" aria-label={t("drive.close")}><X className="h-4 w-4" /></button>
@@ -419,11 +436,26 @@ function Drive({ email }) {
             {uploads.map((u) => (
               <li key={u.key} className="px-4 py-2.5">
                 <div className="flex items-center justify-between gap-2 text-sm">
-                  <span dir="auto" className="truncate text-slate-800">{u.name}</span>
-                  {u.error ? <X className="h-4 w-4 shrink-0 text-rose-600" /> : u.done ? <Check className="h-4 w-4 shrink-0 text-emerald-600" /> : <span className="shrink-0 text-xs tabular-nums text-slate-500">{Math.round(u.progress * 100)}%</span>}
+                  <span className="min-w-0 truncate font-medium text-slate-800"><bdi>{u.name}</bdi></span>
+                  {u.error ? <X className="h-4 w-4 shrink-0 text-rose-600" /> : u.done ? <Check className="h-4 w-4 shrink-0 text-emerald-600" /> : <span className="shrink-0 text-xs font-semibold tabular-nums text-brand-700">{Math.round(u.progress * 100)}%</span>}
                 </div>
                 {u.error ? <p className="mt-0.5 text-xs text-rose-600">{u.error}</p> : (
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-brand-600 transition-all" style={{ width: `${u.progress * 100}%` }} /></div>
+                  <>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-brand-600 transition-all" style={{ width: `${u.progress * 100}%` }} /></div>
+                    <p className="mt-1 flex flex-wrap gap-x-2 text-[11px] tabular-nums text-slate-500">
+                      {u.done ? <span>{t("drive.up.done", { size: formatBytes(u.size) })}</span>
+                        : !u.started ? <span>{t("drive.up.waiting", { size: formatBytes(u.size) })}</span>
+                        : (
+                          <>
+                            <span><bdi dir="ltr">{formatBytes(Math.round(u.progress * u.size))}</bdi> {t("drive.of")} <bdi dir="ltr">{formatBytes(u.size)}</bdi></span>
+                            <span aria-hidden="true">·</span>
+                            <span><bdi dir="ltr">{u.speed ? `${formatBytes(Math.round(u.speed))}/s` : "…"}</bdi></span>
+                            <span aria-hidden="true">·</span>
+                            <span>{u.eta == null ? t("drive.up.calc") : formatLeft(u.eta, t)}</span>
+                          </>
+                        )}
+                    </p>
+                  </>
                 )}
               </li>
             ))}
@@ -455,6 +487,15 @@ function Drive({ email }) {
       {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg">{toast}</div>}
     </div>
   );
+}
+
+/** "5 seconds left", "3 min 20 sec left", "1 hr 12 min left". */
+function formatLeft(sec, t) {
+  const s = Math.max(1, Math.round(sec));
+  if (s < 60) return t("drive.up.leftSec", { s });
+  const m = Math.floor(s / 60);
+  if (m < 60) return t("drive.up.leftMin", { m, s: s % 60 });
+  return t("drive.up.leftHr", { h: Math.floor(m / 60), m: m % 60 });
 }
 
 function IconBtn({ label, icon: Icon, onClick, danger, className = "" }) {
