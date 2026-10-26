@@ -26,7 +26,7 @@ export function AnnouncementBanner({ text, level = "info", onDismiss, dismissLab
 
 /* ---------- Modal dialog ---------- */
 
-export function Modal({ title, children, onClose, footer, tone = "default" }) {
+export function Modal({ title, children, onClose, footer, tone = "default", wide = false }) {
   const panel = useRef(null);
   useEffect(() => {
     const prev = document.activeElement;
@@ -44,7 +44,7 @@ export function Modal({ title, children, onClose, footer, tone = "default" }) {
         aria-modal="true"
         aria-labelledby="modal-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md overflow-hidden rounded-t-2xl bg-surface shadow-2xl sm:rounded-2xl"
+        className={`w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-hidden rounded-t-2xl bg-surface shadow-2xl sm:rounded-2xl`}
       >
         <div className={`h-1 ${tone === "danger" ? "bg-rose-500" : "bg-brand-600"}`} />
         <div className="p-6">

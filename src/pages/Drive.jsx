@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Check, ChevronLeft, CloudUpload, Copy, Download, Eye, File, FileArchive, FileAudio, FileSpreadsheet, FileText,
+  ArrowLeft, Check, Play, ChevronLeft, CloudUpload, Copy, Download, Eye, File, FileArchive, FileAudio, FileSpreadsheet, FileText,
   FileVideo, Folder, FolderInput, FolderPlus, HardDrive, Image as ImageIcon, Link2, Loader2, Pencil, Search, Trash2, X,
 } from "lucide-react";
 import { BRAND } from "../config.js";
@@ -15,14 +15,28 @@ import {
 } from "../lib/api.js";
 
 const IMG = /^image\/(png|jpe?g|gif|webp|avif|bmp)$/i;
+const VIDEO_EXT = { mp4: "video/mp4", m4v: "video/mp4", webm: "video/webm", mov: "video/quicktime", ogv: "video/ogg" };
+const AUDIO_EXT = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", aac: "audio/aac", flac: "audio/flac", opus: "audio/ogg" };
+const extOf = (name) => (name.split(".").pop() || "").toLowerCase();
+/** "image" | "video" | "audio" | null: what the site can show without downloading. */
+function previewKind(item) {
+  if (item.folder) return null;
+  const m = (item.mime || "").toLowerCase();
+  if (IMG.test(m)) return "image";
+  if (m.startsWith("video/") || VIDEO_EXT[extOf(item.name)]) return "video";
+  if (m.startsWith("audio/") || AUDIO_EXT[extOf(item.name)]) return "audio";
+  return null;
+}
+/** The real media type, so the player knows what it's playing (the server sends files as plain downloads). */
+const mediaType = (item) => (item.mime && item.mime !== "application/octet-stream" ? item.mime : VIDEO_EXT[extOf(item.name)] || AUDIO_EXT[extOf(item.name)] || "application/octet-stream");
 
 function typeOf(item) {
   if (item.folder) return { Icon: Folder, tone: "bg-amber-50 text-amber-600" };
   const m = item.mime || "";
   const ext = (item.name.split(".").pop() || "").toLowerCase();
   if (m.startsWith("image/")) return { Icon: ImageIcon, tone: "bg-pink-50 text-pink-600" };
-  if (m.startsWith("video/")) return { Icon: FileVideo, tone: "bg-violet-50 text-violet-600" };
-  if (m.startsWith("audio/")) return { Icon: FileAudio, tone: "bg-sky-50 text-sky-600" };
+  if (m.startsWith("video/") || VIDEO_EXT[ext]) return { Icon: FileVideo, tone: "bg-violet-50 text-violet-600" };
+  if (m.startsWith("audio/") || AUDIO_EXT[ext]) return { Icon: FileAudio, tone: "bg-sky-50 text-sky-600" };
   if (/zip|rar|7z|tar|gzip/.test(m) || ["zip", "rar", "7z", "gz"].includes(ext)) return { Icon: FileArchive, tone: "bg-orange-50 text-orange-600" };
   if (/sheet|excel|csv/.test(m) || ["xlsx", "xls", "csv"].includes(ext)) return { Icon: FileSpreadsheet, tone: "bg-emerald-50 text-emerald-600" };
   if (/pdf|text|word|document|presentation/.test(m)) return { Icon: FileText, tone: "bg-brand-50 text-brand-600" };
@@ -177,20 +191,34 @@ function ShareDialog({ item, onChange, onClose }) {
 
 function PreviewDialog({ item, onClose, onDownload }) {
   const { t } = useI18n();
+  const kind = previewKind(item);
   const [url, setUrl] = useState(null);
   const [failed, setFailed] = useState(false);
+  const [unplayable, setUnplayable] = useState(false);
   useEffect(() => {
     let u;
-    driveDownload(item.id, true).then((b) => { u = URL.createObjectURL(b); setUrl(u); }).catch(() => setFailed(true));
+    driveDownload(item.id, true)
+      .then((b) => { u = URL.createObjectURL(kind === "image" ? b : new Blob([b], { type: mediaType(item) })); setUrl(u); })
+      .catch(() => setFailed(true));
     return () => { if (u) URL.revokeObjectURL(u); };
-  }, [item.id]);
+  }, [item, kind]);
+  const msg = failed ? t("drive.previewFailed") : unplayable ? t("drive.cantPlay") : "";
   return (
-    <Modal title={item.name} onClose={onClose}
+    <Modal title={item.name} onClose={onClose} wide={kind !== "audio"}
       footer={<><Button variant="ghost" onClick={onClose}>{t("drive.close")}</Button><Button onClick={onDownload}><Download className="h-4 w-4" /> {t("drive.download")}</Button></>}>
-      <div className="grid min-h-48 place-items-center overflow-hidden rounded-xl bg-slate-100">
-        {failed ? <p className="p-6 text-sm text-slate-500">{t("drive.previewFailed")}</p>
-          : url ? <img src={url} alt={item.name} className="max-h-[60vh] w-auto object-contain" />
-          : <Loader2 className="h-6 w-6 animate-spin text-slate-400" />}
+      <div className={`grid min-h-48 place-items-center overflow-hidden rounded-xl ${kind === "video" ? "bg-black" : "bg-slate-100"}`}>
+        {msg ? <p className={`p-6 text-center text-sm ${kind === "video" ? "text-white/80" : "text-slate-500"}`}>{msg}</p>
+          : !url ? <div className="flex flex-col items-center gap-2 p-6"><Loader2 className={`h-6 w-6 animate-spin ${kind === "video" ? "text-white/60" : "text-slate-400"}`} />{kind !== "image" && <span className={`text-xs ${kind === "video" ? "text-white/60" : "text-slate-500"}`}>{t("drive.loadingMedia")}</span>}</div>
+          : kind === "video" ? (
+            <video src={url} controls autoPlay playsInline onError={() => setUnplayable(true)} className="max-h-[65vh] w-full bg-black" aria-label={item.name}>
+              {t("drive.cantPlay")}
+            </video>
+          ) : kind === "audio" ? (
+            <div className="flex w-full flex-col items-center gap-4 p-6">
+              <span className="grid h-16 w-16 place-items-center rounded-2xl bg-sky-50 text-sky-600"><FileAudio className="h-8 w-8" aria-hidden="true" /></span>
+              <audio src={url} controls autoPlay onError={() => setUnplayable(true)} className="w-full" aria-label={item.name} />
+            </div>
+          ) : <img src={url} alt={item.name} className="max-h-[60vh] w-auto object-contain" />}
       </div>
     </Modal>
   );
@@ -261,7 +289,7 @@ function Drive({ email }) {
   };
   const open = async (item) => {
     if (item.folder) return openFolder(item.id);
-    if (IMG.test(item.mime)) return setDialog({ kind: "preview", item });
+    if (previewKind(item)) return setDialog({ kind: "preview", item });
     download(item);
   };
 
@@ -355,7 +383,7 @@ function Drive({ email }) {
                       </span>
                     </button>
                     <div className="flex shrink-0 items-center gap-0.5 sm:opacity-0 sm:transition sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                      {!item.folder && IMG.test(item.mime) && <IconBtn label={t("drive.view")} icon={Eye} onClick={() => open(item)} className="max-sm:hidden" />}
+                      {previewKind(item) && <IconBtn label={previewKind(item) === "image" ? t("drive.view") : t("drive.play")} icon={previewKind(item) === "image" ? Eye : Play} onClick={() => open(item)} className="max-sm:hidden" />}
                       {!item.folder && <IconBtn label={t("drive.download")} icon={Download} onClick={() => download(item)} />}
                       {!item.folder && <IconBtn label={t("drive.share")} icon={Link2} onClick={() => setDialog({ kind: "share", item })} />}
                       <IconBtn label={t("drive.rename")} icon={Pencil} onClick={() => setDialog({ kind: "rename", item })} className="max-sm:hidden" />
