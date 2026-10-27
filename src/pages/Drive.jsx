@@ -156,9 +156,28 @@ function ShareDialog({ item, onChange, onClose }) {
   };
   return (
     <Modal title={t("drive.shareTitle", { name: it.name })} onClose={onClose} footer={<Button variant="ghost" onClick={onClose}>{t("drive.close")}</Button>}>
-      <Toggle id="share-on" checked={!!it.shareToken} disabled={busy} onChange={toggle} label={t("drive.shareToggle")} description={t(it.folder ? "drive.shareHintFolder" : "drive.shareHint")} />
+      <Toggle id="share-on" checked={!!it.shareToken} disabled={busy} onChange={toggle} label={t("drive.shareToggle")}
+        description={t(it.viewOnly ? "drive.shareHintViewOnly" : it.folder ? "drive.shareHintFolder" : "drive.shareHint")} />
       {link && (
         <>
+          <fieldset className="mt-4">
+            <legend className="text-sm font-semibold text-slate-800">{t("drive.modeTitle")}</legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {[[true, Lock, "drive.modeView", "drive.modeViewHint"], [false, Download, "drive.modeDownload", "drive.modeDownloadHint"]].map(([vo, Icon, label, hint]) => {
+                const on = !!it.viewOnly === vo;
+                return (
+                  <button key={label} type="button" role="radio" aria-checked={on} disabled={busy} onClick={() => !on && setMode(!vo)}
+                    className={`flex items-start gap-3 rounded-xl border-2 p-3 text-start transition ${on ? "border-brand-600 bg-brand-50" : "border-slate-200 hover:border-slate-300"}`}>
+                    <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ${on ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-500"}`}><Icon className="h-4 w-4" aria-hidden="true" /></span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold text-slate-900">{t(label)}</span>
+                      <span className="mt-0.5 block text-xs leading-snug text-slate-500">{t(hint)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 p-1.5 ps-3">
             <input readOnly dir="ltr" value={link} aria-label={t("drive.shareLink")} onFocus={(e) => e.target.select()} className="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-700 focus:outline-none" />
             <Button onClick={copy}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? t("drive.copied") : t("drive.copy")}</Button>
@@ -168,10 +187,6 @@ function ShareDialog({ item, onChange, onClose }) {
             <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">{t(it.folder ? "drive.openFolderPage" : "drive.openPage")} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
           </div>
           <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">{t(it.folder ? "drive.shareWhoFolder" : "drive.shareWho")}</p>
-          <div className="mt-4">
-            <Toggle id="share-dl" checked={!it.viewOnly} disabled={busy} onChange={setMode} label={t("drive.allowDownload")}
-              description={t(it.viewOnly ? "drive.allowDownloadOff" : "drive.allowDownloadOn")} />
-          </div>
         </>
       )}
       {(it.viewOnly || it.requests > 0) && <ShareRequests id={it.id} onCount={(n) => { setIt((x) => ({ ...x, requests: n })); onChange({ ...it, requests: n }); }} />}
