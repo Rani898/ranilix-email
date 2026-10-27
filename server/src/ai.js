@@ -22,50 +22,68 @@ function systemPrompt(name) {
 // Google changes model names now and then: use GEMINI_MODEL if set, otherwise pick the newest
 // stable "flash" model the key can use (and remember it for a while).
 let picked = null;
-async function modelFor(env, avoid = []) {
-  if (env.GEMINI_MODEL && !avoid.includes(env.GEMINI_MODEL)) return env.GEMINI_MODEL;
-  if (picked && picked.until > Date.now() && !avoid.includes(picked.name)) return picked.name;
-  const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": env.GEMINI_API_KEY } });
-  if (!res.ok) throw new Error(`models ${res.status}`);
-  const { models = [] } = await res.json();
-  const ver = (n) => Number((/gemini-(\d+(?:\.\d+)?)/.exec(n) || [])[1] || 0);
-  const ok = models
-    .map((m) => ({ name: m.name.replace(/^models\//, ""), methods: m.supportedGenerationMethods || [] }))
-    .filter((m) => m.methods.includes("generateContent") && /^gemini-[\d.]+-flash/.test(m.name)
-      && !/(image|tts|live|audio|embedding|thinking|exp|computer|robotics|native)/.test(m.name) && !avoid.includes(m.name));
-  // Stable before preview, newer first, the full flash before lite.
-  ok.sort((a, b) => (/preview/.test(a.name) - /preview/.test(b.name)) || (ver(b.name) - ver(a.name)) || (/lite/.test(a.name) - /lite/.test(b.name)));
-  if (!ok.length) throw new Error("no model");
-  picked = { name: ok[0].name, until: Date.now() + 6 * 3600 * 1000 };
-  return picked.name;
+// Names Google keeps pointing at a current model, used when the list can't be read.
+const ALIASES = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite"];
+async function candidates(env) {
+  const list = [];
+  if (env.GEMINI_MODEL) list.push(env.GEMINI_MODEL);
+  if (picked && picked.until > Date.now()) list.push(picked.name);
+  try {
+    const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": env.GEMINI_API_KEY } });
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      const data = await res.json().catch(() => ({}));
+      const err = new Error(data?.error?.message || `models ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    if (res.ok) {
+      const { models = [] } = await res.json();
+      const ver = (n) => Number((/gemini-(\d+(?:\.\d+)?)/.exec(n) || [])[1] || 0);
+      const ok = models
+        .map((m) => ({ name: m.name.replace(/^models\//, ""), methods: m.supportedGenerationMethods || [] }))
+        .filter((m) => m.methods.includes("generateContent") && /^gemini-([\d.]+-)?flash/.test(m.name)
+          && !/(image|tts|live|audio|embedding|thinking|exp|computer|robotics|native)/.test(m.name));
+      // Stable before preview, newer first, the full flash before lite.
+      ok.sort((a, b) => (/preview/.test(a.name) - /preview/.test(b.name)) || (ver(b.name) - ver(a.name)) || (/lite/.test(a.name) - /lite/.test(b.name)));
+      list.push(...ok.map((m) => m.name));
+    }
+  } catch (e) {
+    if (e.status) throw e; // the key itself is the problem
+  }
+  list.push(...ALIASES);
+  return [...new Set(list)];
 }
 
 async function ask(env, contents, name) {
   const body = JSON.stringify({
     systemInstruction: { parts: [{ text: systemPrompt(name) }] },
     contents,
-    generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+    generationConfig: { temperature: 0.9, maxOutputTokens: 4096 },
   });
-  const tried = [];
-  for (let i = 0; i < 3; i++) {
-    const model = await modelFor(env, tried);
-    tried.push(model);
+  let last = null;
+  const list = await candidates(env);
+  for (const model of list.slice(0, 6)) {
     const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY }, body,
     });
-    if (res.status === 404) { picked = null; continue; } // that model is gone: pick another
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = new Error(data?.error?.message || `gemini ${res.status}`);
-      err.status = res.status;
-      throw err;
+    if (res.ok) {
+      picked = { name: model, until: Date.now() + 6 * 3600 * 1000 };
+      // Newer models may send "thoughts" first: keep only the answer.
+      const parts = (data.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought);
+      const text = parts.map((p) => p.text || "").join("").trim();
+      if (text) return text;
+      if (data.candidates?.[0]?.finishReason === "SAFETY" || data.promptFeedback?.blockReason) return null;
+      return "";
     }
-    const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
-    if (text) return text;
-    if (data.candidates?.[0]?.finishReason === "SAFETY" || data.promptFeedback?.blockReason) return null;
-    return "";
+    last = new Error(`${model}: ${data?.error?.message || res.status}`);
+    last.status = res.status;
+    // A wrong key won't get better with another model; a missing/unsupported model might.
+    if (res.status === 401 || res.status === 403 || res.status === 429) throw last;
+    if (res.status === 400 && /api key/i.test(data?.error?.message || "")) throw last;
+    if (picked?.name === model) picked = null;
   }
-  throw new Error("no working model");
+  throw last || new Error("no working model");
 }
 
 /** /api/ai/* for a logged-in admin. */
@@ -105,10 +123,13 @@ export async function aiRoute(req, env, path, user, h) {
     try {
       reply = await ask(env, contents, name);
     } catch (e) {
-      console.error("ai", e?.message);
-      if (e?.status === 429) throw new h.HttpError(429, "Mochi needs a short break. Try again in a minute.", "ai_busy");
-      if (e?.status === 400 || e?.status === 403) throw new h.HttpError(502, "The Gemini key isn't working.", "ai_key");
-      throw new h.HttpError(502, "Mochi couldn't answer right now. Try again.", "ai_failed");
+      const detail = String(e?.message || "").slice(0, 300);
+      console.error("ai", detail);
+      h.log?.("errors", "🤖 מוצ'י לא הצליח לענות", { "סטטוס": String(e?.status || ""), "פרטים": detail });
+      // Only admins reach this room, so the technical reason is shown to help fix it.
+      if (e?.status === 429) throw new h.HttpError(429, "Mochi needs a short break. Try again in a minute.", "ai_busy", { detail });
+      if (e?.status === 401 || e?.status === 403 || (e?.status === 400 && /api key/i.test(detail))) throw new h.HttpError(502, "The Gemini key isn't working.", "ai_key", { detail });
+      throw new h.HttpError(502, "Mochi couldn't answer right now. Try again.", "ai_failed", { detail });
     }
     if (reply === null) reply = "💗 על זה אני לא יכול/ה לענות. בוא/י נדבר על משהו אחר?";
     if (!reply) reply = "...🤔";

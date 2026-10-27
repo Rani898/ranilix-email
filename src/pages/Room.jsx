@@ -64,7 +64,7 @@ export default function Room() {
       const { message } = await aiSend(msg);
       setMessages((m) => [...m, message]);
     } catch (e) {
-      setError(errorText(e));
+      setError(`${errorText(e)}${e?.params?.detail ? `\n${e.params.detail}` : ""}`);
       setText(msg);
       setMessages((m) => m.filter((x) => x.id !== mine.id));
     }
@@ -162,7 +162,7 @@ export default function Room() {
               {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizontal className="h-5 w-5 rtl:rotate-180" />}
             </button>
           </form>
-          {error && <p role="alert" className="mx-auto mt-2 max-w-2xl text-sm text-rose-600">{error}</p>}
+          {error && <p role="alert" className="mx-auto mt-2 max-w-2xl whitespace-pre-wrap break-words text-sm text-rose-600">{error}</p>}
           <p className="mx-auto mt-1.5 max-w-2xl text-center text-[11px] text-slate-400">{t("room.note")}</p>
         </footer>
       )}
