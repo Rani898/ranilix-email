@@ -290,11 +290,16 @@ live.driveDownload = async (id, view = false) => (await request(`/api/drive/${id
 // The link people get opens a download page on the site (/share?f=…), which then fetches the file from the server.
 const sharePage = (token) => `${window.location.origin}${import.meta.env.BASE_URL || "/"}share?f=${token}`;
 live.driveShareUrl = sharePage;
-live.sharedInfo = (token) => request(`/api/drive/s/${encodeURIComponent(token)}/info`);
-live.sharedFileUrl = (token, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${view ? "?view=1" : ""}`;
+live.sharedInfo = (token, k) => request(`/api/drive/s/${encodeURIComponent(token)}/info${k ? `?k=${encodeURIComponent(k)}` : ""}`);
+live.sharedRequest = (token, body) => request(`/api/drive/s/${encodeURIComponent(token)}/request`, { method: "POST", body });
+live.driveShareMode = (id, viewOnly) => request(`/api/drive/${encodeURIComponent(id)}/share-mode`, { method: "POST", body: { viewOnly }, auth: true });
+live.driveShareRequests = (id) => request(`/api/drive/${encodeURIComponent(id)}/requests`, { auth: true });
+live.driveShareDecide = (id, rid, status) => request(`/api/drive/${encodeURIComponent(id)}/requests/${encodeURIComponent(rid)}`, { method: "POST", body: { status }, auth: true });
+const qs = (o) => { const q = Object.entries(o).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v === true ? 1 : v)}`).join("&"); return q ? `?${q}` : ""; };
+live.sharedFileUrl = (token, view = false, k = "") => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${qs({ view, k })}`;
 live.driveShareVisits = (id) => request(`/api/drive/${encodeURIComponent(id)}/visits`, { auth: true });
 live.sharedList = (token, sub) => request(`/api/drive/s/${encodeURIComponent(token)}/list${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`);
-live.sharedItemUrl = (token, id, view = false, thumb = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}/file/${encodeURIComponent(id)}${view ? `?view=1${thumb ? "&thumb=1" : ""}` : ""}`;
+live.sharedItemUrl = (token, id, view = false, thumb = false, k = "") => `${API_URL}/api/drive/s/${encodeURIComponent(token)}/file/${encodeURIComponent(id)}${qs({ view, thumb: view && thumb, k })}`;
 live.sharedFetch = async (token) => (await request(`/api/drive/s/${encodeURIComponent(token)}?view=1`, { raw: true })).blob();
 /** Send one request with upload progress (fetch can't report upload progress, XHR can). */
 function xhrSend(method, path, body, contentType, onProgress) {
@@ -433,8 +438,12 @@ const demoShared = (token) => {
   if (!it) throw new ApiError("", "drive_link_gone");
   return it;
 };
-demo.sharedInfo = async (token) => { const it = demoShared(token); if (it.folder) return { folder: true, name: it.name, count: demoDrive().items.filter((i) => i.parent === it.id).length, sharedAt: it.updatedAt }; return { name: it.name, size: it.size, mime: it.mime, sharedAt: it.updatedAt }; };
+demo.sharedInfo = async (token) => { const it = demoShared(token); const vo = { viewOnly: !!it.viewOnly, access: it.viewOnly ? "none" : "approved" }; if (it.folder) return { folder: true, name: it.name, count: demoDrive().items.filter((i) => i.parent === it.id).length, sharedAt: it.updatedAt, ...vo }; return { name: it.name, size: it.size, mime: it.mime, sharedAt: it.updatedAt, viewable: true, ...vo }; };
 demo.sharedFileUrl = (token) => { try { return demoShared(token).data; } catch { return "#"; } };
+demo.driveShareMode = async (id, viewOnly) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); if (it) it.viewOnly = !!viewOnly; demoDriveSave(d); return { viewOnly: !!viewOnly }; };
+demo.driveShareRequests = async () => ({ requests: [] });
+demo.driveShareDecide = async (id, rid, status) => ({ ok: true, status });
+demo.sharedRequest = async () => ({ key: "0".repeat(32), status: "pending" });
 demo.driveShareVisits = async () => ({ summary: { people: 0, opens: 0, views: 0, downloads: 0 }, visits: [] });
 demo.sharedList = async (token, sub) => {
   const root = demoShared(token); const d = demoDrive();
@@ -459,5 +468,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits,
+  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits, sharedRequest, driveShareMode, driveShareRequests, driveShareDecide,
 } = api;

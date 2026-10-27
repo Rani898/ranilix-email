@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, MoreVertical, Square, CheckSquare, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
-  Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Monitor, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
+  Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Lock, Monitor, Inbox as InboxIcon, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
@@ -13,7 +13,7 @@ import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
 import { useVideoThumb } from "../lib/videoThumbs.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveShareVisits, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareDecide, driveShareMode, driveShareRequests, driveShareUrl, driveShareVisits, driveUpload,
 } from "../lib/api.js";
 
 function saveBlob(blob, filename) {
@@ -144,6 +144,11 @@ function ShareDialog({ item, onChange, onClose }) {
     try { const next = await driveShare(it.id, on); setIt(next); onChange(next); setError(""); } catch (e) { setError(errorText(e)); }
     setBusy(false);
   };
+  const setMode = async (allow) => {
+    setBusy(true);
+    try { const r = await driveShareMode(it.id, !allow); const next = { ...it, viewOnly: r.viewOnly }; setIt(next); onChange(next); setError(""); } catch (e) { setError(errorText(e)); }
+    setBusy(false);
+  };
   const copy = async () => {
     try { await navigator.clipboard.writeText(link); } catch { /* visible anyway */ }
     setCopied(true);
@@ -163,8 +168,13 @@ function ShareDialog({ item, onChange, onClose }) {
             <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">{t(it.folder ? "drive.openFolderPage" : "drive.openPage")} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
           </div>
           <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">{t(it.folder ? "drive.shareWhoFolder" : "drive.shareWho")}</p>
+          <div className="mt-4">
+            <Toggle id="share-dl" checked={!it.viewOnly} disabled={busy} onChange={setMode} label={t("drive.allowDownload")}
+              description={t(it.viewOnly ? "drive.allowDownloadOff" : "drive.allowDownloadOn")} />
+          </div>
         </>
       )}
+      {(it.viewOnly || it.requests > 0) && <ShareRequests id={it.id} onCount={(n) => { setIt((x) => ({ ...x, requests: n })); onChange({ ...it, requests: n }); }} />}
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
       {(it.shareToken || it.downloads > 0) && <ShareVisits id={it.id} />}
     </Modal>
@@ -172,6 +182,69 @@ function ShareDialog({ item, onChange, onClose }) {
 }
 
 const DEVICE_ICON = { phone: Smartphone, tablet: Tablet, computer: Monitor };
+
+/** People asking to download from a view-only link: approve or decline each one. */
+function ShareRequests({ id, onCount }) {
+  const { t, locale } = useI18n();
+  const errorText = useErrorText();
+  const [list, setList] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    driveShareRequests(id).then((d) => { setList(d.requests); setFailed(false); onCount?.(d.requests.filter((r) => r.status === "pending").length); }).catch(() => setFailed(true));
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+  const decide = async (r, status) => {
+    setBusyId(r.id); setError("");
+    try { await driveShareDecide(id, r.id, status); load(); } catch (e) { setError(errorText(e)); }
+    setBusyId(null);
+  };
+  const region = useMemo(() => { try { return new Intl.DisplayNames([locale], { type: "region" }); } catch { return null; } }, [locale]);
+  const when = (ts) => new Date(ts).toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const badge = { pending: "bg-amber-100 text-amber-800", approved: "bg-emerald-100 text-emerald-800", denied: "bg-slate-100 text-slate-600" };
+  return (
+    <section className="mt-5 border-t border-slate-200 pt-4" aria-label={t("drive.requests.title")}>
+      <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><InboxIcon className="h-4 w-4 text-brand-600" aria-hidden="true" /> {t("drive.requests.title")}</h3>
+      {failed ? <p className="mt-2 text-sm text-rose-600">{t("drive.requests.failed")}</p>
+        : !list ? <div className="grid place-items-center py-4 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
+        : list.length === 0 ? <p className="mt-2 rounded-xl bg-slate-50 px-3 py-3 text-center text-sm text-slate-500">{t("drive.requests.none")}</p>
+        : (
+          <ul className="mt-3 max-h-64 space-y-2 overflow-y-auto">
+            {list.map((r) => {
+              const Icon = DEVICE_ICON[r.device] || Monitor;
+              const place = [r.country && r.country !== "XX" ? (region?.of(r.country) || r.country) : "", r.city].filter(Boolean).join(", ");
+              return (
+                <li key={r.id} className={`rounded-xl border px-3 py-2.5 ${r.status === "pending" ? "border-amber-200 bg-amber-50/50" : "border-slate-200"}`}>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700"><Icon className="h-4 w-4" aria-hidden="true" /></span>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-900">
+                        <bdi>{r.name}</bdi>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${badge[r.status]}`}>{t(`drive.requests.${r.status}`)}</span>
+                      </p>
+                      {r.email && <p className="text-xs text-slate-600"><bdi dir="ltr">{r.email}</bdi></p>}
+                      {r.note && <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface px-2 py-1 text-xs text-slate-700"><bdi>{r.note}</bdi></p>}
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {when(r.at)} · {t(`drive.visits.device.${r.device || "computer"}`)}{[r.os, r.browser].filter(Boolean).length ? <> · <bdi dir="ltr">{[r.os, r.browser].filter(Boolean).join(" · ")}</bdi></> : null}{place && <> · {place}</>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex justify-end gap-2">
+                    {r.status !== "approved" && <Button className="!px-3 !py-1.5 text-xs" disabled={busyId === r.id} onClick={() => decide(r, "approved")}><Check className="h-3.5 w-3.5" />{t("drive.requests.approve")}</Button>}
+                    {r.status === "pending" && <Button variant="ghost" className="!px-3 !py-1.5 text-xs" disabled={busyId === r.id} onClick={() => decide(r, "denied")}>{t("drive.requests.deny")}</Button>}
+                    {r.status === "approved" && <Button variant="ghost" className="!px-3 !py-1.5 text-xs" disabled={busyId === r.id} onClick={() => decide(r, "denied")}>{t("drive.requests.revoke")}</Button>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      {error && <p role="alert" className="mt-2 text-sm text-rose-600">{error}</p>}
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{t("drive.requests.hint")}</p>
+    </section>
+  );
+}
 
 /** Who opened the link: when, on what kind of device, from roughly where. */
 function ShareVisits({ id }) {
@@ -529,6 +602,8 @@ function Drive({ email }) {
                           {item.folder ? t("drive.folder") : <bdi dir="ltr">{formatBytes(item.size)}</bdi>}
                           <span aria-hidden="true">·</span>{dateFmt(item.updatedAt)}
                           {item.shared && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-700"><Link2 className="h-3 w-3" /> {t("drive.sharedChip")}{item.downloads > 0 && <> · {t("drive.downloadsShort", { n: item.downloads })}</>}</span>}
+                          {item.shared && item.viewOnly && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600"><Lock className="h-3 w-3" /> {t("drive.viewOnlyChip")}</span>}
+                          {item.requests > 0 && <button type="button" onClick={() => setDialog({ kind: "share", item })} className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 hover:bg-amber-200"><InboxIcon className="h-3 w-3" /> {t("drive.requestsChip", { n: item.requests })}</button>}
                         </span>
                       </span>
                     </button>
@@ -722,7 +797,8 @@ function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, 
               {!item.folder && ext && <span className="rounded bg-surface/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">{ext}</span>}
             </span>
           )}
-          {item.shared && <span className="absolute bottom-2 start-2 grid h-6 w-6 place-items-center rounded-full bg-emerald-600/90 text-white" title={t("drive.sharedChip")}><Link2 className="h-3.5 w-3.5" aria-label={t("drive.sharedChip")} /></span>}
+          {item.shared && <span className="absolute bottom-2 start-2 grid h-6 w-6 place-items-center rounded-full bg-emerald-600/90 text-white" title={t(item.viewOnly ? "drive.viewOnlyChip" : "drive.sharedChip")}>{item.viewOnly ? <Lock className="h-3.5 w-3.5" aria-label={t("drive.viewOnlyChip")} /> : <Link2 className="h-3.5 w-3.5" aria-label={t("drive.sharedChip")} />}</span>}
+          {item.requests > 0 && <span className="absolute top-2 end-2 rounded-full bg-amber-500 px-1.5 py-0.5 text-[11px] font-bold text-white shadow" title={t("drive.requestsChip", { n: item.requests })}>{item.requests}</span>}
         </span>
       </button>
       <button type="button" role="checkbox" aria-checked={selected} aria-label={t("drive.selectItem", { name: item.name })} onClick={onToggleSelect}

@@ -802,7 +802,7 @@ async function route(req, env, log) {
 
   // Public drive share links (anyone with the link).
   if (path.startsWith("/api/drive/s/") || path.startsWith("/api/drive/f/")) {
-    const res = await driveShareRoute(req, env, path, { HttpError, rateLimit, json, sha256 });
+    const res = await driveShareRoute(req, env, path, { HttpError, rateLimit, json, sha256, randomHex, insertMessage, notifyUser });
     if (res) return res;
   }
 

@@ -289,3 +289,30 @@ CREATE TABLE IF NOT EXISTS drive_share_visits (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_share_visits ON drive_share_visits (share_id, at);
+
+-- Share link options: view_only = people with the link can watch but must ask to download.
+CREATE TABLE IF NOT EXISTS drive_share_opts (
+  file_id INTEGER PRIMARY KEY,
+  view_only INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
+-- "May I download this?" requests from people with a view-only link.
+CREATE TABLE IF NOT EXISTS drive_share_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  share_id INTEGER NOT NULL,
+  key_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  email TEXT,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  device TEXT,
+  os TEXT,
+  browser TEXT,
+  country TEXT,
+  city TEXT,
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_share_requests ON drive_share_requests (share_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_share_requests_key ON drive_share_requests (key_hash);

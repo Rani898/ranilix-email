@@ -123,7 +123,7 @@ const cleanName = (s) => String(s || "").replace(/[\u0000-\u001f\u007f/\\]/g, ""
 const clientItem = (r) => ({
   id: String(r.id), name: r.name, folder: !!r.is_folder, size: r.size, mime: r.mime || "",
   createdAt: r.created_at, updatedAt: r.updated_at, shared: !!r.share_token, shareToken: r.share_token || null,
-  downloads: r.downloads || 0,
+  downloads: r.downloads || 0, viewOnly: !!r.view_only, requests: r.pending || 0,
 });
 
 async function ownItem(env, userId, id) {
@@ -271,6 +271,24 @@ async function logVisit(env, req, h, shareId, item, kind) {
   } catch { /* never stop the file over this */ }
 }
 
+/* ---- View-only links: watching is open, downloading needs the owner's OK ---- */
+
+const isViewOnly = (env, shareId) => cached(`vo:${shareId}`, 10000, async () =>
+  !!(await env.DB.prepare("SELECT view_only FROM drive_share_opts WHERE file_id = ?").bind(shareId).first())?.view_only);
+
+/** 'none' | 'pending' | 'approved' | 'denied' for the visitor holding `key`. */
+async function accessOf(env, h, shareId, key) {
+  if (!key || !/^[a-f0-9]{32}$/.test(key)) return "none";
+  const keyHash = await h.sha256(key);
+  return cached(`ak:${keyHash}`, 5000, async () => {
+    const r = await env.DB.prepare("SELECT status FROM drive_share_requests WHERE share_id = ? AND key_hash = ?").bind(shareId, keyHash).first();
+    return r ? r.status : "none";
+  });
+}
+
+// Things a browser can show in the page; anything else can only be downloaded.
+const VIEWABLE = /^(image\/(png|jpe?g|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|mp4|ogg|wav|aac|flac|webm)|application\/pdf|text\/plain)$/;
+
 // Pieces of a video come one after another: remember the folder checks for a few seconds.
 const shareCache = new Map();
 async function cached(key, ms, load) {
@@ -326,18 +344,60 @@ export async function driveShareRoute(req, env, path, h) {
     return serveShared(req, env, h, url, root, row);
   }
 
+  // Ask the owner for permission to download (view-only links).
+  const rq = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})\/request$/);
+  if (rq && req.method === "POST") {
+    const share = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ?").bind(rq[1]).first();
+    if (!share) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
+    let body = {};
+    try { body = await req.json(); } catch { /* empty */ }
+    const name = String(body.name || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 60);
+    const email = String(body.email || "").trim().slice(0, 120);
+    const note = String(body.note || "").replace(/[\u0000-\u0008\u000b-\u001f]/g, " ").trim().slice(0, 300);
+    if (!name) throw new h.HttpError(400, "Please write your name.", "share_req_name");
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new h.HttpError(400, "That email doesn't look right.", "share_req_email");
+    const ip = req.headers.get("CF-Connecting-IP") || "local";
+    await h.rateLimit(env, `sharereq:${ip}`, 8, 3600 * 1000);
+    const open = await env.DB.prepare("SELECT COUNT(*) AS n FROM drive_share_requests WHERE share_id = ? AND status = 'pending'").bind(share.id).first();
+    if (open.n >= 50) throw new h.HttpError(429, "Too many requests are waiting for this link.", "rate_limited");
+    const key = h.randomHex(16);
+    const { device, os, browser } = deviceOf(req.headers.get("User-Agent") || "");
+    const cf = req.cf || {};
+    const now = Date.now();
+    await env.DB.prepare("INSERT INTO drive_share_requests (share_id, key_hash, name, email, note, status, device, os, browser, country, city, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)")
+      .bind(share.id, await h.sha256(key), name, email || null, note || null, device, os, browser, cf.country || "", cf.city || "", now).run();
+    // Tell the owner in their inbox (one note per few minutes per link, so a crowd can't flood it).
+    try {
+      const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM drive_share_requests WHERE share_id = ? AND created_at > ? AND created_at < ?").bind(share.id, now - 10 * 60 * 1000, now).first();
+      if (!recent.n && h.insertMessage) {
+        const owner = await env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(share.user_id).first();
+        await h.insertMessage(env, share.user_id, {
+          folder: "inbox", fromName: "Ranilix Drive", fromAddr: `drive@${env.MAIL_DOMAIN}`, to: owner ? `${owner.username}@${env.MAIL_DOMAIN}` : "",
+          subject: `בקשה להורדה: ${share.name}`,
+          body: `${name}${email ? ` (${email})` : ""} מבקש/ת להוריד את "${share.name}" מהקישור ששיתפת.${note ? `\n\nהודעה: ${note}` : ""}\n\nכדי לאשר או לדחות: הדרייב שלך ← "${share.name}" ← שיתוף בקישור.\n\n${name} asked to download "${share.name}". Open your drive → share settings to approve or decline.`,
+          date: now,
+        });
+        await h.notifyUser?.(env, share.user_id);
+      }
+    } catch (e) { console.error("share request note", e); /* the request is saved anyway */ }
+    return h.json({ key, status: "pending" }, 201);
+  }
+
   const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})(\/info)?$/);
   if (!m || req.method !== "GET") return null;
   const row = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ?").bind(m[1]).first();
   if (!row) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
   // The download page asks for the name, size and type first (nothing private: no owner, no folder).
   if (m[2]) {
-    await logVisit(env, req, h, row.id, null, "open");
+    const key = new URL(req.url).searchParams.get("k");
+    if (!key) await logVisit(env, req, h, row.id, null, "open"); // checking on a request isn't a new visit
+    const viewOnly = await isViewOnly(env, row.id);
+    const access = viewOnly ? await accessOf(env, h, row.id, key) : "approved";
     if (row.is_folder) {
       const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM drive_files WHERE parent_id = ? AND user_id = ?").bind(row.id, row.user_id).first();
-      return h.json({ folder: true, name: row.name, count: c.n, sharedAt: row.updated_at });
+      return h.json({ folder: true, name: row.name, count: c.n, sharedAt: row.updated_at, viewOnly, access });
     }
-    return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at });
+    return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at, viewOnly, access, viewable: VIEWABLE.test(playableType(row)) });
   }
   if (row.is_folder) throw new h.HttpError(400, "That's a folder.", "drive_folder");
   return serveShared(req, env, h, new URL(req.url), row, row);
@@ -350,6 +410,13 @@ export async function driveShareRoute(req, env, path, h) {
 async function serveShared(req, env, h, url, share, row) {
   const view = url.searchParams.get("view") === "1";
   const thumb = url.searchParams.get("thumb") === "1";
+  if (await isViewOnly(env, share.id)) {
+    // Watching in the page is fine; a real download (or a file the page can't show) needs an approved request.
+    const needsOk = !view || !VIEWABLE.test(playableType(row));
+    if (needsOk && (await accessOf(env, h, share.id, url.searchParams.get("k"))) !== "approved") {
+      throw new h.HttpError(403, "The owner has to approve downloads for this link.", "drive_view_only");
+    }
+  }
   const range = req.headers.get("Range");
   const firstPiece = !range || /^bytes=0-/.test(range.trim());
   if (!view && firstPiece) {
@@ -379,7 +446,9 @@ export async function driveRoute(req, env, path, url, user, h) {
   // List a folder
   if (path === "/api/drive" && req.method === "GET") {
     const folder = await folderParam(env, user.id, url.searchParams.get("folder"), HttpError);
-    const { results } = await env.DB.prepare(`SELECT f.*, COALESCE(s.downloads, 0) AS downloads FROM drive_files f LEFT JOIN drive_share_stats s ON s.file_id = f.id
+    const { results } = await env.DB.prepare(`SELECT f.*, COALESCE(s.downloads, 0) AS downloads, COALESCE(o.view_only, 0) AS view_only,
+      (SELECT COUNT(*) FROM drive_share_requests q WHERE q.share_id = f.id AND q.status = 'pending') AS pending
+      FROM drive_files f LEFT JOIN drive_share_stats s ON s.file_id = f.id LEFT JOIN drive_share_opts o ON o.file_id = f.id
       WHERE f.user_id = ? AND f.parent_id IS ? ORDER BY f.is_folder DESC, f.name COLLATE NOCASE LIMIT 1000`)
       .bind(user.id, folder).all();
     return json({ items: results.map(clientItem), path: await breadcrumbs(env, user.id, folder), ...(await usage()) });
@@ -529,7 +598,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ links });
   }
 
-  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/link|\/visits)?$/);
+  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/share-mode|\/link|\/visits|\/requests(?:\/\d+)?)?$/);
   if (!m) return null;
   const item = await ownItem(env, user.id, m[1]);
   if (!item) throw new HttpError(404, "Not found.", "drive_not_found");
@@ -547,6 +616,45 @@ export async function driveRoute(req, env, path, url, user, h) {
     const token = h.randomHex(20);
     await env.DB.prepare("INSERT INTO drive_links (token, file_id, expires_at) VALUES (?, ?, ?)").bind(token, item.id, Date.now() + 6 * 3600 * 1000).run();
     return json({ path: `/api/drive/f/${token}` });
+  }
+
+  if (m[2] === "/share-mode" && req.method === "POST") {
+    const { viewOnly } = await readJson(req);
+    await env.DB.prepare("INSERT INTO drive_share_opts (file_id, view_only, updated_at) VALUES (?, ?, ?) ON CONFLICT(file_id) DO UPDATE SET view_only = excluded.view_only, updated_at = excluded.updated_at")
+      .bind(item.id, viewOnly ? 1 : 0, Date.now()).run();
+    shareCache.delete(`vo:${item.id}`);
+    return json({ viewOnly: !!viewOnly });
+  }
+
+  if (m[2] === "/requests" && req.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT id, name, email, note, status, device, os, browser, country, city, created_at, decided_at FROM drive_share_requests WHERE share_id = ? ORDER BY (status = 'pending') DESC, created_at DESC LIMIT 200").bind(item.id).all();
+    return json({ requests: results.map((r) => ({ id: String(r.id), name: r.name, email: r.email || "", note: r.note || "", status: r.status, device: r.device, os: r.os, browser: r.browser, country: r.country, city: r.city, at: r.created_at, decidedAt: r.decided_at })) });
+  }
+
+  const rm = m[2] && /^\/requests\/(\d+)$/.exec(m[2]);
+  if (rm && req.method === "POST") {
+    const { status } = await readJson(req);
+    if (!["approved", "denied"].includes(status)) throw new HttpError(400, "Choose approve or decline.");
+    const r = await env.DB.prepare("SELECT * FROM drive_share_requests WHERE id = ? AND share_id = ?").bind(Number(rm[1]), item.id).first();
+    if (!r) throw new HttpError(404, "Not found.", "drive_not_found");
+    await env.DB.prepare("UPDATE drive_share_requests SET status = ?, decided_at = ? WHERE id = ?").bind(status, Date.now(), r.id).run();
+    shareCache.delete(`ak:${r.key_hash}`);
+    // Let them know by email when they left one.
+    if (status === "approved" && r.status !== "approved" && r.email && env.RESEND_API_KEY && item.share_token) {
+      try {
+        const link = `https://rani898.github.io/ranilix-email/share?f=${item.share_token}`;
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from: `"Ranilix Drive" <drive@${env.MAIL_DOMAIN}>`, to: [r.email],
+            subject: `אושר: אפשר להוריד את "${item.name}"`,
+            text: `היי ${r.name},\n\nהבקשה שלך להוריד את "${item.name}" אושרה.\nפתחו את הקישור מאותו מכשיר ששלחתם ממנו את הבקשה, ותראו כפתור הורדה:\n${link}\n\n---\nYour request to download "${item.name}" was approved. Open the link on the same device you asked from:\n${link}`,
+          }),
+        });
+      } catch { /* the page shows it anyway */ }
+    }
+    return json({ ok: true, status });
   }
 
   if (m[2] === "/visits" && req.method === "GET") {
@@ -567,7 +675,8 @@ export async function driveRoute(req, env, path, url, user, h) {
     await env.DB.prepare("UPDATE drive_files SET share_token = ? WHERE id = ?").bind(token, item.id).run();
     if (!on) await env.DB.prepare("DELETE FROM drive_share_stats WHERE file_id = ?").bind(item.id).run();
     if (on) log("accounts", "🔗 קובץ מהדרייב שותף בקישור", { "משתמש": user.email });
-    return json(clientItem({ ...item, share_token: token }));
+    const opts = await env.DB.prepare("SELECT view_only FROM drive_share_opts WHERE file_id = ?").bind(item.id).first();
+    return json(clientItem({ ...item, share_token: token, view_only: opts?.view_only || 0 }));
   }
 
   // Rename / move
@@ -612,6 +721,8 @@ export async function driveRoute(req, env, path, url, user, h) {
 export async function driveCleanup(env) {
   await env.DB.prepare("DELETE FROM drive_links WHERE expires_at < ?").bind(Date.now()).run();
   await env.DB.prepare("DELETE FROM drive_share_visits WHERE at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 90 * 24 * 3600 * 1000).run();
+  await env.DB.prepare("DELETE FROM drive_share_requests WHERE created_at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 180 * 24 * 3600 * 1000).run();
+  await env.DB.prepare("DELETE FROM drive_share_opts WHERE file_id NOT IN (SELECT id FROM drive_files)").run();
   if (!env.DRIVE) return;
   const { results } = await env.DB.prepare("SELECT * FROM drive_uploads WHERE created_at < ?").bind(Date.now() - 24 * 3600 * 1000).all();
   for (const r of results) {
