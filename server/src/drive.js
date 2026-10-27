@@ -42,12 +42,33 @@ async function get(env, key) {
   return env.DRIVE ? (await env.DRIVE.get(key))?.body ?? null : null;
 }
 /** Read a file, honouring an HTTP Range request when the bytes are in R2 (lets videos stream and seek). */
-async function getForResponse(env, key, rangeHeader) {
+/**
+ * `cap` (bytes) is used for playing in the page: an open range ("bytes=0-") gets at most that much
+ * back, and the player simply asks for the next piece. Without it every video on a page holds a
+ * never-ending download open, which chokes the connection: pages hang and videos won't start.
+ */
+async function getForResponse(env, key, rangeHeader, cap = 0) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec((rangeHeader || "").trim());
+  const pick = (total) => {
+    let start; let end;
+    if (m[1] === "") { start = Math.max(0, total - Number(m[2])); end = total - 1; }
+    else { start = Number(m[1]); end = m[2] === "" ? total - 1 : Math.min(Number(m[2]), total - 1); }
+    if (cap && end - start + 1 > cap) end = start + cap - 1;
+    return [start, end];
+  };
+  const partial = (body, start, end, total) => ({
+    body, status: 206,
+    headers: { "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(end - start + 1), "Accept-Ranges": "bytes" },
+  });
   if (inKv(key) || !env.DRIVE) {
     const body = await get(env, key);
-    return body ? { body, status: 200, headers: {} } : null;
+    if (!body) return null;
+    if (!m || (m[1] === "" && m[2] === "")) return { body, status: 200, headers: { "Content-Length": String(body.byteLength), "Accept-Ranges": "bytes" } };
+    const total = body.byteLength;
+    const [start, end] = pick(total);
+    if (start >= total || start > end) return { body: null, status: 416, headers: { "Content-Range": `bytes */${total}` } };
+    return partial(body.slice(start, end + 1), start, end, total);
   }
-  const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader || "");
   if (!m || (m[1] === "" && m[2] === "")) {
     const obj = await env.DRIVE.get(key);
     return obj ? { body: obj.body, status: 200, headers: { "Content-Length": String(obj.size), "Accept-Ranges": "bytes" } } : null;
@@ -55,19 +76,15 @@ async function getForResponse(env, key, rangeHeader) {
   const head = await env.DRIVE.head(key);
   if (!head) return null;
   const total = head.size;
-  let start; let end;
-  if (m[1] === "") { start = Math.max(0, total - Number(m[2])); end = total - 1; }
-  else { start = Number(m[1]); end = m[2] === "" ? total - 1 : Math.min(Number(m[2]), total - 1); }
+  const [start, end] = pick(total);
   if (start >= total || start > end) {
     return { body: null, status: 416, headers: { "Content-Range": `bytes */${total}` } };
   }
   const obj = await env.DRIVE.get(key, { range: { offset: start, length: end - start + 1 } });
   if (!obj) return null;
-  return {
-    body: obj.body, status: 206,
-    headers: { "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": String(end - start + 1), "Accept-Ranges": "bytes" },
-  };
+  return partial(obj.body, start, end, total);
 }
+const STREAM_PIECE = 4 * 1024 * 1024;
 
 async function remove(env, key) {
   if (key.startsWith("att/")) {
@@ -146,14 +163,30 @@ async function folderParam(env, userId, raw, HttpError) {
   return f.id;
 }
 
+// Phones and computers often upload videos without a type (or with one players don't know):
+// go by the file's ending so the player in the page gets something it can play.
+const BY_EXT = {
+  mp4: "video/mp4", m4v: "video/mp4", mov: "video/mp4", webm: "video/webm", mkv: "video/webm", ogv: "video/ogg",
+  mp3: "audio/mpeg", m4a: "audio/mp4", aac: "audio/aac", wav: "audio/wav", ogg: "audio/ogg", oga: "audio/ogg", flac: "audio/flac", opus: "audio/ogg",
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp", avif: "image/avif", pdf: "application/pdf", txt: "text/plain",
+};
+function playableType(row) {
+  const ext = (/\.([a-z0-9]{1,5})$/i.exec(row.name || "") || [])[1]?.toLowerCase();
+  let mime = (row.mime || "").toLowerCase();
+  if (mime === "video/quicktime" || mime === "video/x-matroska") mime = BY_EXT[ext] || mime;
+  if (!mime || mime === "application/octet-stream") mime = BY_EXT[ext] || "";
+  return mime;
+}
+
 function fileResponse(body, row, inline, extra = { status: 200, headers: {} }) {
   // Images and PDFs may open in the browser; everything else downloads (an HTML file must never run as a page).
-  const safeInline = inline && /^(image\/(png|jpe?g|gif|webp|avif)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|wav|aac|flac|webm)|application\/pdf|text\/plain)$/.test(row.mime || "");
+  const mime = playableType(row);
+  const safeInline = inline && /^(image\/(png|jpe?g|gif|webp|avif)|video\/(mp4|webm|ogg)|audio\/(mpeg|mp4|ogg|wav|aac|flac|webm)|application\/pdf|text\/plain)$/.test(mime);
   return new Response(body, {
     status: extra.status,
     headers: {
       ...extra.headers,
-      "Content-Type": safeInline ? row.mime : "application/octet-stream",
+      "Content-Type": safeInline ? mime : "application/octet-stream",
       "Content-Disposition": `${safeInline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
       "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
       "X-Content-Type-Options": "nosniff",
@@ -206,6 +239,49 @@ async function insideShared(env, root, id) {
   return null;
 }
 
+/* ---- Who opened a shared link (for the person who shared it) ---- */
+
+/** Kind of device, system and browser, from the browser's own description. */
+export function deviceOf(ua = "") {
+  const device = /iPad|Tablet|Tab(?!le)|SM-T|Kindle|Silk/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua)) ? "tablet"
+    : /Mobi|iPhone|iPod|Android/i.test(ua) ? "phone" : "computer";
+  const os = /iPhone|iPod/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android"
+    : /Windows/.test(ua) ? "Windows" : /CrOS/.test(ua) ? "ChromeOS" : /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\/|Opera/.test(ua) ? "Opera" : /SamsungBrowser/.test(ua) ? "Samsung Internet"
+    : /FBAN|FBAV|Instagram/.test(ua) ? "Facebook/Instagram" : /WhatsApp/.test(ua) ? "WhatsApp"
+    : /FxiOS|Firefox/.test(ua) ? "Firefox" : /CriOS|Chrome/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "";
+  return { device, os, browser };
+}
+
+async function logVisit(env, req, h, shareId, item, kind) {
+  try {
+    const ip = req.headers.get("CF-Connecting-IP") || "local";
+    const ua = req.headers.get("User-Agent") || "";
+    // The same person gets the same short code, without keeping their address.
+    const visitor = (await h.sha256(`${shareId}|${ip}|${ua}`)).slice(0, 12);
+    const now = Date.now();
+    const quiet = { open: 10, view: 30, download: 2 }[kind] * 60 * 1000;
+    const seen = await env.DB.prepare("SELECT 1 FROM drive_share_visits WHERE share_id = ? AND visitor = ? AND kind = ? AND item_id IS ? AND at > ? LIMIT 1")
+      .bind(shareId, visitor, kind, item?.id ?? null, now - quiet).first();
+    if (seen) return;
+    const { device, os, browser } = deviceOf(ua);
+    const cf = req.cf || {};
+    await env.DB.prepare("INSERT INTO drive_share_visits (share_id, item_id, item_name, kind, visitor, device, os, browser, country, city, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(shareId, item?.id ?? null, item?.name ?? null, kind, visitor, device, os, browser, cf.country || req.headers.get("CF-IPCountry") || "", cf.city || "", now).run();
+  } catch { /* never stop the file over this */ }
+}
+
+// Pieces of a video come one after another: remember the folder checks for a few seconds.
+const shareCache = new Map();
+async function cached(key, ms, load) {
+  const hit = shareCache.get(key);
+  if (hit && hit.until > Date.now()) return hit.value;
+  const value = await load();
+  if (shareCache.size > 500) shareCache.clear();
+  shareCache.set(key, { value, until: Date.now() + ms });
+  return value;
+}
+
 /** Public share link: /api/drive/s/<token> (no login). */
 export async function driveShareRoute(req, env, path, h) {
   // Short-lived streaming / download link made by the owner (/api/drive/f/<token>).
@@ -214,14 +290,15 @@ export async function driveShareRoute(req, env, path, h) {
     const link = await env.DB.prepare("SELECT file_id FROM drive_links WHERE token = ? AND expires_at > ?").bind(f[1], Date.now()).first();
     const row = link && await env.DB.prepare("SELECT * FROM drive_files WHERE id = ? AND is_folder = 0").bind(link.file_id).first();
     if (!row) throw new h.HttpError(404, "This link has expired.", "drive_link_gone");
-    const got = await getForResponse(env, row.storage_key, req.headers.get("Range"));
+    const view = new URL(req.url).searchParams.get("view") === "1";
+    const got = await getForResponse(env, row.storage_key, req.headers.get("Range"), view ? STREAM_PIECE : 0);
     if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
-    return fileResponse(got.body, row, new URL(req.url).searchParams.get("view") === "1", got);
+    return fileResponse(got.body, row, view, got);
   }
   // A shared folder: browse it (and its sub-folders) and open the files inside.
   const fm = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})\/(list|file\/(\d+))$/);
   if (fm && req.method === "GET") {
-    const root = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 1").bind(fm[1]).first();
+    const root = await cached(`r:${fm[1]}`, 15000, () => env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 1").bind(fm[1]).first());
     if (!root) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
     const url = new URL(req.url);
     if (fm[2] === "list") {
@@ -243,19 +320,10 @@ export async function driveShareRoute(req, env, path, h) {
         items: results.map((r) => ({ id: String(r.id), name: r.name, folder: !!r.is_folder, size: r.size, mime: r.mime || "", updatedAt: r.updated_at })),
       });
     }
-    const chain = await insideShared(env, root, Number(fm[3]));
+    const chain = await cached(`c:${root.id}:${fm[3]}`, 15000, () => insideShared(env, root, Number(fm[3])));
     const row = chain && chain[chain.length - 1];
     if (!row || row.is_folder) throw new h.HttpError(404, "Not found.", "drive_not_found");
-    const range = req.headers.get("Range");
-    const firstPiece = !range || /^bytes=0-/.test(range);
-    if (firstPiece) await h.rateLimit(env, `share:${fm[1]}`, 3000, 24 * 3600 * 1000);
-    const got = await getForResponse(env, row.storage_key, range);
-    if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
-    const view = url.searchParams.get("view") === "1";
-    if (!view && firstPiece) {
-      await env.DB.prepare("INSERT INTO drive_share_stats (file_id, downloads) VALUES (?, 1) ON CONFLICT(file_id) DO UPDATE SET downloads = downloads + 1").bind(root.id).run();
-    }
-    return fileResponse(got.body, row, view, got);
+    return serveShared(req, env, h, url, root, row);
   }
 
   const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})(\/info)?$/);
@@ -264,6 +332,7 @@ export async function driveShareRoute(req, env, path, h) {
   if (!row) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
   // The download page asks for the name, size and type first (nothing private: no owner, no folder).
   if (m[2]) {
+    await logVisit(env, req, h, row.id, null, "open");
     if (row.is_folder) {
       const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM drive_files WHERE parent_id = ? AND user_id = ?").bind(row.id, row.user_id).first();
       return h.json({ folder: true, name: row.name, count: c.n, sharedAt: row.updated_at });
@@ -271,14 +340,30 @@ export async function driveShareRoute(req, env, path, h) {
     return h.json({ name: row.name, size: row.size, mime: row.mime || "", sharedAt: row.updated_at });
   }
   if (row.is_folder) throw new h.HttpError(400, "That's a folder.", "drive_folder");
+  return serveShared(req, env, h, new URL(req.url), row, row);
+}
+
+/**
+ * One file of a share (`share` is the shared file or folder). Playing in the page (?view=1) comes in
+ * small pieces and is never limited; ?thumb=1 is the little picture in the gallery (not counted as a visit).
+ */
+async function serveShared(req, env, h, url, share, row) {
+  const view = url.searchParams.get("view") === "1";
+  const thumb = url.searchParams.get("thumb") === "1";
   const range = req.headers.get("Range");
-  const firstPiece = !range || /^bytes=0-/.test(range); // a video asks for many pieces: count/limit once
-  if (firstPiece) await h.rateLimit(env, `share:${m[1]}`, 500, 24 * 3600 * 1000);
-  const got = await getForResponse(env, row.storage_key, range);
-  if (!got) throw new h.HttpError(404, "Not found.", "drive_link_gone");
-  const view = new URL(req.url).searchParams.get("view") === "1";
+  const firstPiece = !range || /^bytes=0-/.test(range.trim());
   if (!view && firstPiece) {
-    await env.DB.prepare("INSERT INTO drive_share_stats (file_id, downloads) VALUES (?, 1) ON CONFLICT(file_id) DO UPDATE SET downloads = downloads + 1").bind(row.id).run();
+    // Downloads: a limit per visitor (not per link), so one person can't block everyone else.
+    const ip = req.headers.get("CF-Connecting-IP") || "local";
+    await h.rateLimit(env, `sharedl:${share.id}:${ip}`, 300, 3600 * 1000);
+  }
+  const got = await getForResponse(env, row.storage_key, range, view ? STREAM_PIECE : 0);
+  if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
+  if (firstPiece && !thumb && got.status !== 416) {
+    if (!view) {
+      await env.DB.prepare("INSERT INTO drive_share_stats (file_id, downloads) VALUES (?, 1) ON CONFLICT(file_id) DO UPDATE SET downloads = downloads + 1").bind(share.id).run();
+    }
+    await logVisit(env, req, h, share.id, row, view ? "view" : "download");
   }
   return fileResponse(got.body, row, view, got);
 }
@@ -444,7 +529,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ links });
   }
 
-  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/link)?$/);
+  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/link|\/visits)?$/);
   if (!m) return null;
   const item = await ownItem(env, user.id, m[1]);
   if (!item) throw new HttpError(404, "Not found.", "drive_not_found");
@@ -462,6 +547,18 @@ export async function driveRoute(req, env, path, url, user, h) {
     const token = h.randomHex(20);
     await env.DB.prepare("INSERT INTO drive_links (token, file_id, expires_at) VALUES (?, ?, ?)").bind(token, item.id, Date.now() + 6 * 3600 * 1000).run();
     return json({ path: `/api/drive/f/${token}` });
+  }
+
+  if (m[2] === "/visits" && req.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT item_name, kind, visitor, device, os, browser, country, city, at FROM drive_share_visits WHERE share_id = ? ORDER BY at DESC LIMIT 300").bind(item.id).all();
+    const sum = await env.DB.prepare("SELECT COUNT(*) AS total, COUNT(DISTINCT visitor) AS people, SUM(kind = 'open') AS opens, SUM(kind = 'download') AS downloads, SUM(kind = 'view') AS views FROM drive_share_visits WHERE share_id = ?").bind(item.id).first();
+    // Number the visitors in the order they first came (visitor 1, 2, 3 ...).
+    const order = new Map();
+    [...results].reverse().forEach((r) => { if (!order.has(r.visitor)) order.set(r.visitor, order.size + 1); });
+    return json({
+      summary: { people: sum.people || 0, opens: sum.opens || 0, downloads: sum.downloads || 0, views: sum.views || 0 },
+      visits: results.map((r) => ({ at: r.at, kind: r.kind, item: r.item_name, visitor: order.get(r.visitor), device: r.device, os: r.os, browser: r.browser, country: r.country, city: r.city })),
+    });
   }
 
   if (m[2] === "/share" && req.method === "POST") {
@@ -514,6 +611,7 @@ export async function driveRoute(req, env, path, url, user, h) {
 /** Daily: drop expired links and give up on uploads that never finished. */
 export async function driveCleanup(env) {
   await env.DB.prepare("DELETE FROM drive_links WHERE expires_at < ?").bind(Date.now()).run();
+  await env.DB.prepare("DELETE FROM drive_share_visits WHERE at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 90 * 24 * 3600 * 1000).run();
   if (!env.DRIVE) return;
   const { results } = await env.DB.prepare("SELECT * FROM drive_uploads WHERE created_at < ?").bind(Date.now() - 24 * 3600 * 1000).all();
   for (const r of results) {

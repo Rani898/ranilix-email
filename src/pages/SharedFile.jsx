@@ -1,7 +1,7 @@
 // Public download page for a file someone shared from their drive: /share?f=<token>.
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ChevronLeft, Download, FileAudio, Folder, FolderOpen, Link2Off, Loader2, Play, ShieldCheck, X } from "lucide-react";
+import { ChevronLeft, Download, Eye, FileAudio, Folder, FolderOpen, Link2Off, Loader2, Play, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { BRAND } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
 import Preferences from "../components/Preferences.jsx";
@@ -9,6 +9,42 @@ import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
 import { sharedFileUrl, sharedInfo, sharedItemUrl, sharedList } from "../lib/api.js";
+import { mmss, useVideoThumb } from "../lib/videoThumbs.js";
+
+// A weak phone connection often fails once and works a second later: try a few times before giving up.
+async function withRetry(fn, tries = 3) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      const gone = e?.code === "drive_link_gone" || e?.code === "drive_not_found";
+      if (gone || i >= tries - 1) throw e;
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+}
+
+function Unplayable({ href, name }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-col items-center gap-3 p-8 text-center">
+      <p className="max-w-sm text-sm text-white/80">{t("shared.cantPlay")}</p>
+      <a href={href} download={name} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-4 py-2 text-sm font-bold text-[#0B1220] hover:bg-white/90">
+        <Download className="h-4 w-4" aria-hidden="true" /> {t("shared.download")}
+      </a>
+    </div>
+  );
+}
+
+function RetryBox({ text, onRetry }) {
+  const { t } = useI18n();
+  return (
+    <div role="alert" className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-6 text-center text-sm text-amber-800">
+      <p>{text}</p>
+      <button type="button" onClick={onRetry} className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2 font-bold text-white hover:bg-amber-500">
+        <RefreshCw className="h-4 w-4" aria-hidden="true" /> {t("shared.retry")}
+      </button>
+    </div>
+  );
+}
 
 const PREVIEW_MAX = 30 * 1024 * 1024; // show it in the page only when it's small enough to load whole
 
@@ -19,7 +55,8 @@ function Preview({ token, info }) {
   const [bad, setBad] = useState(false);
   // Straight from the server: videos stream and can be skipped through, whatever their size.
   useEffect(() => { if (kind) setUrl(sharedFileUrl(token, true)); }, [token, kind]);
-  if (!kind || (kind === "image" && info.size > PREVIEW_MAX) || bad) return null;
+  if (!kind || (kind === "image" && info.size > PREVIEW_MAX) || (bad && kind !== "video")) return null;
+  if (bad) return <div className="mt-6 overflow-hidden rounded-2xl bg-black"><Unplayable href={sharedFileUrl(token)} name={info.name} /></div>;
   return (
     <div className={`mt-6 grid min-h-40 place-items-center overflow-hidden rounded-2xl ${kind === "video" ? "bg-black" : "bg-slate-100"}`}>
       {!url ? <Loader2 className={`h-6 w-6 animate-spin ${kind === "video" ? "text-white/60" : "text-slate-400"}`} />
@@ -43,12 +80,13 @@ function SharedFolder({ token, info }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
     setData(null); setError("");
-    sharedList(token, sub).then((d) => alive && setData(d)).catch((e) => alive && setError(errorText(e)));
+    withRetry(() => sharedList(token, sub)).then((d) => alive && setData(d)).catch((e) => alive && setError(errorText(e)));
     return () => { alive = false; };
-  }, [token, sub, errorText]);
+  }, [token, sub, errorText, attempt]);
   const crumbs = [{ id: null, name: info.name }, ...(data?.path || [])];
   const date = new Date(info.sharedAt).toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
   return (
@@ -75,7 +113,7 @@ function SharedFolder({ token, info }) {
         </nav>
       )}
 
-      {error ? <p role="alert" className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+      {error ? <RetryBox text={error} onRetry={() => setAttempt((n) => n + 1)} />
         : !data ? <div className="grid place-items-center py-16 text-slate-400"><Loader2 className="h-7 w-7 animate-spin" /></div>
         : data.items.length === 0 ? <p className="mt-6 rounded-2xl bg-slate-50 py-12 text-center text-slate-500">{t("shared.folderEmpty")}</p>
         : (
@@ -87,6 +125,9 @@ function SharedFolder({ token, info }) {
       <p className="mt-6 flex items-start gap-2 text-xs leading-relaxed text-slate-500">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" /> {t("shared.safety")}
       </p>
+      <p className="mt-2 flex items-start gap-2 text-xs leading-relaxed text-slate-500">
+        <Eye className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" /> {t("shared.visitsNote")}
+      </p>
       {open && <ItemViewer token={token} item={open} onClose={() => setOpen(null)} />}
     </div>
   );
@@ -97,17 +138,20 @@ function FolderTile({ token, item, onOpen }) {
   const kind = item.folder ? null : previewKind(item);
   const [broken, setBroken] = useState(false);
   const type = typeOf(item);
+  const [box, vt] = useVideoThumb(kind === "video" ? `${token}:${item.id}:${item.updatedAt}` : null, kind === "video" ? sharedItemUrl(token, item.id, true, true) : null);
   const media = !broken && (kind === "image" || kind === "video");
   return (
     <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-surface transition hover:border-brand-300 hover:shadow-md">
-      <button type="button" onClick={onOpen} aria-label={item.folder ? t("shared.openFolder", { name: item.name }) : item.name}
-        className="relative grid aspect-square w-full place-items-center overflow-hidden bg-slate-50">
+      <button ref={box} type="button" onClick={onOpen} aria-label={item.folder ? t("shared.openFolder", { name: item.name }) : item.name}
+        className={`relative grid aspect-square w-full place-items-center overflow-hidden ${kind === "video" ? "bg-[#1c1c1e]" : "bg-slate-50"}`}>
         {item.folder ? <Folder className="h-14 w-14 fill-amber-300 text-amber-500" aria-hidden="true" />
-          : media && kind === "image" ? <img src={sharedItemUrl(token, item.id, true)} alt="" loading="lazy" onError={() => setBroken(true)} className="h-full w-full object-cover" />
+          : media && kind === "image" ? <img src={sharedItemUrl(token, item.id, true, true)} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} className="h-full w-full object-cover" />
           : media && kind === "video" ? (
             <>
-              <video src={`${sharedItemUrl(token, item.id, true)}#t=0.1`} preload="metadata" muted playsInline onError={() => setBroken(true)} className="h-full w-full bg-black object-cover" />
-              <span className="absolute grid h-10 w-10 place-items-center rounded-full bg-black/55 text-white"><Play className="h-5 w-5 fill-white" aria-hidden="true" /></span>
+              {vt.poster ? <img src={vt.poster} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                : !vt.ready ? <Loader2 className="absolute h-6 w-6 animate-spin text-white/40" aria-hidden="true" /> : null}
+              <span className="absolute grid h-11 w-11 place-items-center rounded-full bg-black/55 text-white backdrop-blur"><Play className="h-5 w-5 fill-white" aria-hidden="true" /></span>
+              {Number.isFinite(vt.duration) && <span dir="ltr" className="absolute bottom-2 end-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white">{mmss(vt.duration)}</span>}
             </>
           ) : <span className={`grid h-14 w-14 place-items-center rounded-2xl ${type.tone}`}><type.Icon className="h-7 w-7" aria-hidden="true" /></span>}
       </button>
@@ -130,6 +174,8 @@ function FolderTile({ token, item, onOpen }) {
 function ItemViewer({ token, item, onClose }) {
   const { t } = useI18n();
   const kind = previewKind(item);
+  const [bad, setBad] = useState(false);
+  const [loading, setLoading] = useState(kind === "video" || kind === "image");
   const url = sharedItemUrl(token, item.id, true);
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -148,9 +194,15 @@ function ItemViewer({ token, item, onClose }) {
           <button type="button" onClick={onClose} aria-label={t("shared.close")} className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
         </div>
         <div className={`grid min-h-48 flex-1 place-items-center overflow-auto ${kind === "video" || kind === "image" ? "bg-black" : "bg-slate-50"}`}>
-          {kind === "video" ? <video src={url} controls autoPlay playsInline className="max-h-[75vh] w-full" />
-            : kind === "image" ? <img src={url} alt={item.name} className="max-h-[75vh] w-auto object-contain" />
-            : kind === "audio" ? <div className="flex w-full flex-col items-center gap-3 p-8"><FileAudio className="h-8 w-8 text-sky-600" aria-hidden="true" /><audio src={url} controls autoPlay className="w-full" /></div>
+          {bad ? <Unplayable href={sharedItemUrl(token, item.id)} name={item.name} />
+            : kind === "video" ? (
+              <div className="relative grid w-full place-items-center">
+                <video src={url} controls autoPlay playsInline preload="auto" onLoadedData={() => setLoading(false)} onCanPlay={() => setLoading(false)} onError={() => setBad(true)} className="max-h-[75vh] w-full" />
+                {loading && <Loader2 className="pointer-events-none absolute h-8 w-8 animate-spin text-white/60" aria-hidden="true" />}
+              </div>
+            )
+            : kind === "image" ? <img src={url} alt={item.name} onError={() => setBad(true)} className="max-h-[75vh] w-auto object-contain" />
+            : kind === "audio" ? <div className="flex w-full flex-col items-center gap-3 p-8"><FileAudio className="h-8 w-8 text-sky-600" aria-hidden="true" /><audio src={url} controls autoPlay onError={() => setBad(true)} className="w-full" /></div>
             : <span className={`m-10 grid h-20 w-20 place-items-center rounded-3xl ${type.tone}`}><type.Icon className="h-10 w-10" aria-hidden="true" /></span>}
         </div>
       </div>
@@ -166,11 +218,13 @@ export default function SharedFile() {
   const valid = /^[a-f0-9]{32}$/.test(token);
   const [info, setInfo] = useState(null);
   const [error, setError] = useState(valid ? "" : "gone");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!valid) return;
-    sharedInfo(token).then(setInfo).catch((e) => setError(e?.code === "drive_link_gone" || e?.code === "drive_not_found" ? "gone" : errorText(e)));
-  }, [token, valid, errorText]);
+    setError("");
+    withRetry(() => sharedInfo(token)).then(setInfo).catch((e) => setError(e?.code === "drive_link_gone" || e?.code === "drive_not_found" ? "gone" : errorText(e)));
+  }, [token, valid, errorText, attempt]);
 
   useEffect(() => {
     const original = document.title;
@@ -200,7 +254,7 @@ export default function SharedFile() {
             <p className="mt-2 text-slate-600">{t("shared.goneText")}</p>
           </div>
         ) : error ? (
-          <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>
+          <RetryBox text={error} onRetry={() => setAttempt((n) => n + 1)} />
         ) : !info ? (
           <div className="grid place-items-center py-24 text-slate-400"><Loader2 className="h-8 w-8 animate-spin" /></div>
         ) : info.folder ? (
@@ -226,6 +280,9 @@ export default function SharedFile() {
             </a>
             <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-slate-500">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" /> {t("shared.safety")}
+            </p>
+            <p className="mt-2 flex items-start gap-2 text-xs leading-relaxed text-slate-500">
+              <Eye className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" /> {t("shared.visitsNote")}
             </p>
           </div>
         )}

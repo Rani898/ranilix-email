@@ -292,8 +292,9 @@ const sharePage = (token) => `${window.location.origin}${import.meta.env.BASE_UR
 live.driveShareUrl = sharePage;
 live.sharedInfo = (token) => request(`/api/drive/s/${encodeURIComponent(token)}/info`);
 live.sharedFileUrl = (token, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${view ? "?view=1" : ""}`;
+live.driveShareVisits = (id) => request(`/api/drive/${encodeURIComponent(id)}/visits`, { auth: true });
 live.sharedList = (token, sub) => request(`/api/drive/s/${encodeURIComponent(token)}/list${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`);
-live.sharedItemUrl = (token, id, view = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}/file/${encodeURIComponent(id)}${view ? "?view=1" : ""}`;
+live.sharedItemUrl = (token, id, view = false, thumb = false) => `${API_URL}/api/drive/s/${encodeURIComponent(token)}/file/${encodeURIComponent(id)}${view ? `?view=1${thumb ? "&thumb=1" : ""}` : ""}`;
 live.sharedFetch = async (token) => (await request(`/api/drive/s/${encodeURIComponent(token)}?view=1`, { raw: true })).blob();
 /** Send one request with upload progress (fetch can't report upload progress, XHR can). */
 function xhrSend(method, path, body, contentType, onProgress) {
@@ -434,6 +435,7 @@ const demoShared = (token) => {
 };
 demo.sharedInfo = async (token) => { const it = demoShared(token); if (it.folder) return { folder: true, name: it.name, count: demoDrive().items.filter((i) => i.parent === it.id).length, sharedAt: it.updatedAt }; return { name: it.name, size: it.size, mime: it.mime, sharedAt: it.updatedAt }; };
 demo.sharedFileUrl = (token) => { try { return demoShared(token).data; } catch { return "#"; } };
+demo.driveShareVisits = async () => ({ summary: { people: 0, opens: 0, views: 0, downloads: 0 }, visits: [] });
 demo.sharedList = async (token, sub) => {
   const root = demoShared(token); const d = demoDrive();
   const byId = (id) => d.items.find((i) => i.id === id);
@@ -457,5 +459,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl,
+  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits,
 } = api;

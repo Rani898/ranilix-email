@@ -272,3 +272,20 @@ CREATE TABLE IF NOT EXISTS drive_links (
   file_id    INTEGER NOT NULL,
   expires_at INTEGER NOT NULL
 );
+
+-- Who opened a shared drive link: time, kind of device and rough place (no IP address is kept).
+CREATE TABLE IF NOT EXISTS drive_share_visits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  share_id INTEGER NOT NULL,
+  item_id INTEGER,
+  item_name TEXT,
+  kind TEXT NOT NULL,
+  visitor TEXT,
+  device TEXT,
+  os TEXT,
+  browser TEXT,
+  country TEXT,
+  city TEXT,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_share_visits ON drive_share_visits (share_id, at);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, MoreVertical, Square, CheckSquare, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
-  Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Pencil, Search, Trash2, X,
+  Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Monitor, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
@@ -11,8 +11,9 @@ import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
+import { useVideoThumb } from "../lib/videoThumbs.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareUrl, driveShareVisits, driveUpload,
 } from "../lib/api.js";
 
 function saveBlob(blob, filename) {
@@ -165,7 +166,75 @@ function ShareDialog({ item, onChange, onClose }) {
         </>
       )}
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
+      {(it.shareToken || it.downloads > 0) && <ShareVisits id={it.id} />}
     </Modal>
+  );
+}
+
+const DEVICE_ICON = { phone: Smartphone, tablet: Tablet, computer: Monitor };
+
+/** Who opened the link: when, on what kind of device, from roughly where. */
+function ShareVisits({ id }) {
+  const { t, locale } = useI18n();
+  const [data, setData] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    setBusy(true);
+    driveShareVisits(id).then((d) => { setData(d); setFailed(false); }).catch(() => setFailed(true)).finally(() => setBusy(false));
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
+  const region = useMemo(() => { try { return new Intl.DisplayNames([locale], { type: "region" }); } catch { return null; } }, [locale]);
+  const place = (v) => [v.country && v.country !== "XX" && v.country !== "T1" ? (region?.of(v.country) || v.country) : "", v.city].filter(Boolean).join(", ");
+  const when = (ts) => new Date(ts).toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const action = (v) => v.kind === "open" ? t("drive.visits.open") : t(v.kind === "view" ? "drive.visits.view" : "drive.visits.download", { name: v.item || "" });
+  const stats = data && [["people", data.summary.people], ["opens", data.summary.opens], ["views", data.summary.views], ["downloads", data.summary.downloads]];
+  return (
+    <section className="mt-5 border-t border-slate-200 pt-4" aria-label={t("drive.visits.title")}>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Users className="h-4 w-4 text-brand-600" aria-hidden="true" /> {t("drive.visits.title")}</h3>
+        <button type="button" onClick={load} disabled={busy} aria-label={t("drive.visits.refresh")} title={t("drive.visits.refresh")}
+          className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} aria-hidden="true" />
+        </button>
+      </div>
+      {failed ? <p className="mt-2 text-sm text-rose-600">{t("drive.visits.failed")}</p>
+        : !data ? <div className="grid place-items-center py-6 text-slate-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
+        : (
+          <>
+            <div className="mt-3 grid grid-cols-4 gap-2">
+              {stats.map(([k, n]) => (
+                <div key={k} className="rounded-xl bg-slate-50 px-2 py-2 text-center">
+                  <div className="text-lg font-extrabold tabular-nums text-slate-900">{n}</div>
+                  <div className="text-[11px] leading-tight text-slate-500">{t(`drive.visits.${k}`)}</div>
+                </div>
+              ))}
+            </div>
+            {data.visits.length === 0 ? <p className="mt-3 rounded-xl bg-slate-50 px-3 py-4 text-center text-sm text-slate-500">{t("drive.visits.none")}</p> : (
+              <ul className="mt-3 max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                {data.visits.map((v, i) => {
+                  const Icon = DEVICE_ICON[v.device] || Monitor;
+                  return (
+                    <li key={i} className="flex items-start gap-3 px-3 py-2.5">
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700" title={t(`drive.visits.device.${v.device || "computer"}`)}><Icon className="h-4 w-4" aria-hidden="true" /></span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-900"><bdi>{action(v)}</bdi></p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          <span className="font-semibold text-slate-600">{t("drive.visits.visitor", { n: v.visitor })}</span>
+                          {" · "}{t(`drive.visits.device.${v.device || "computer"}`)}{[v.os, v.browser].filter(Boolean).length ? <> · <bdi dir="ltr">{[v.os, v.browser].filter(Boolean).join(" · ")}</bdi></> : null}
+                          {place(v) && <> · {place(v)}</>}
+                        </p>
+                      </div>
+                      <time dateTime={new Date(v.at).toISOString()} className="shrink-0 text-xs tabular-nums text-slate-500">{when(v.at)}</time>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{t("drive.visits.privacy")}</p>
+          </>
+        )}
+    </section>
   );
 }
 
@@ -615,26 +684,17 @@ function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, 
   const kind = previewKind(item);
   const { Icon, tone } = typeOf(item);
   const [broken, setBroken] = useState(false);
-  const [duration, setDuration] = useState(null);
   const [playing, setPlaying] = useState(false);
-  const vid = useRef(null);
+  const [hover, setHover] = useState(false);
   const ext = (item.name.split(".").pop() || "").slice(0, 5).toUpperCase();
-  // Videos show their very first frame; pointing at one plays its first seconds (muted, on a loop).
+  // Videos show a picture of their start (made once, in the background); pointing at one plays
+  // its first seconds (muted, on a loop) — only then is the video itself opened.
   const PREVIEW_SECS = 3;
-  const startPreview = () => {
-    const v = vid.current;
-    if (!v) return;
-    v.currentTime = 0;
-    v.play().then(() => setPlaying(true)).catch(() => {});
-  };
-  const stopPreview = () => {
-    const v = vid.current;
-    if (!v) return;
-    v.pause();
-    v.currentTime = 0.05;
-    setPlaying(false);
-  };
-  const media = !item.folder && thumb && !broken && (kind === "image" || kind === "video");
+  const [box, vt] = useVideoThumb(kind === "video" && thumb ? `${item.id}:${item.updatedAt}` : null, thumb || null);
+  const duration = vt.duration;
+  const startPreview = () => { if (kind === "video" && thumb) setHover(true); };
+  const stopPreview = () => { setHover(false); setPlaying(false); };
+  const media = !item.folder && thumb && !broken && (kind === "image" || (kind === "video" && (vt.poster || hover)));
   const showBox = selecting || selected;
   return (
     <li className="group relative">
@@ -642,13 +702,14 @@ function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, 
         className="block w-full rounded-xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300"
         onMouseEnter={kind === "video" ? startPreview : undefined} onMouseLeave={kind === "video" ? stopPreview : undefined}
         onFocus={kind === "video" ? startPreview : undefined} onBlur={kind === "video" ? stopPreview : undefined}>
-        <span className={`relative block overflow-hidden rounded-xl ${large ? "aspect-video" : "aspect-square"} ${media ? "bg-[#1c1c1e]" : item.folder ? "bg-amber-50" : "bg-slate-100"} ${selected ? "ring-4 ring-brand-500 ring-offset-2 ring-offset-surface" : ""}`}>
+        <span ref={box} className={`relative block overflow-hidden rounded-xl ${large ? "aspect-video" : "aspect-square"} ${media ? "bg-[#1c1c1e]" : item.folder ? "bg-amber-50" : "bg-slate-100"} ${selected ? "ring-4 ring-brand-500 ring-offset-2 ring-offset-surface" : ""}`}>
           {media && kind === "image" && <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} className={`h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : "group-hover:scale-[1.03]"}`} />}
-          {media && kind === "video" && (
-            <video ref={vid} src={`${thumb}#t=0.05`} preload="metadata" muted playsInline disablePictureInPicture
-              onError={() => setBroken(true)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+          {media && kind === "video" && vt.poster && <img src={vt.poster} alt="" className={`absolute inset-0 h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : ""}`} />}
+          {media && kind === "video" && hover && (
+            <video src={thumb} autoPlay muted playsInline disablePictureInPicture preload="auto"
+              onPlaying={() => setPlaying(true)} onError={() => setHover(false)}
               onTimeUpdate={(e) => { if (e.currentTarget.currentTime > PREVIEW_SECS) e.currentTarget.currentTime = 0; }}
-              className={`pointer-events-none h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : ""}`} aria-hidden="true" tabIndex={-1} />
+              className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${playing ? "opacity-100" : "opacity-0"} ${selected ? "scale-[0.94] rounded-lg" : ""}`} aria-hidden="true" tabIndex={-1} />
           )}
           {kind === "video" && Number.isFinite(duration) && (
             <span className="absolute bottom-2 end-2 inline-flex items-center gap-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white backdrop-blur" dir="ltr">
