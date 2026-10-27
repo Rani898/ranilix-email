@@ -339,9 +339,9 @@ function Inbox() {
             </Link>
           )}
           {skin.skin === "noya" && skin.nickname && (
-            <span className="hidden items-center gap-1.5 rounded-full border-2 border-dashed border-brand-200 bg-brand-50 py-0.5 pe-3 ps-1 text-sm font-bold text-brand-700 md:inline-flex">
+            <Link to={isAdmin ? "/room" : "/inbox"} title={isAdmin ? t("room.title") : undefined} className="hidden items-center gap-1.5 rounded-full border-2 border-dashed border-brand-200 bg-brand-50 py-0.5 pe-3 ps-1 text-sm font-bold text-brand-700 hover:bg-brand-100 md:inline-flex">
               <Mochi size={26} /> {t("skin.hiName", { name: skin.nickname })}
-            </span>
+            </Link>
           )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>

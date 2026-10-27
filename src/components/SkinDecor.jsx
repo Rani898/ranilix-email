@@ -47,7 +47,7 @@ export default function SkinDecor() {
   const [hi, setHi] = useState(false);
   if (skin.skin !== "noya") return null;
   // The mascot stays out of the way where the drive's upload panel lives.
-  const showMochi = !pathname.startsWith("/share") && !pathname.startsWith("/drive");
+  const showMochi = !["/share", "/drive", "/room"].some((p) => pathname.startsWith(p));
   return (
     <>
       <div className="skin-backdrop" aria-hidden="true" />

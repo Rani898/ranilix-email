@@ -145,6 +145,16 @@ const live = {
 // Account info + site announcement
 const demoSkin = () => demoRead("skin", { skin: "default", nickname: "", background: null });
 demo.getSkin = async () => demoSkin();
+demo.aiChat = async () => ({ ready: true, messages: demoRead("ai", []) });
+demo.aiSend = async (text) => {
+  await delay(700);
+  const list = demoRead("ai", []);
+  const now = Date.now();
+  const message = { id: String(now + 1), role: "model", text: "💗 (בתצוגה הזו מוצ'י רק מתאמן. באתר האמיתי הוא עונה בעזרת Gemini.)", at: now };
+  demoWrite("ai", [...list, { id: String(now), role: "user", text, at: now }, message]);
+  return { message };
+};
+demo.aiClear = async () => { demoWrite("ai", []); return { ok: true }; };
 demo.saveSkin = async (body) => { const s = { ...demoSkin(), ...body }; demoWrite("skin", s); return s; };
 demo.uploadSkinBackground = async (file) => {
   const background = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
@@ -174,6 +184,9 @@ demo.getAnnouncement = async () => {
 };
 live.getMe = () => request("/api/me", { auth: true });
 live.getSkin = () => request("/api/skin", { auth: true });
+live.aiChat = () => request("/api/ai/chat", { auth: true });
+live.aiSend = (text) => request("/api/ai/chat", { method: "POST", body: { text }, auth: true });
+live.aiClear = () => request("/api/ai/chat", { method: "DELETE", auth: true });
 live.saveSkin = (body) => request("/api/skin", { method: "PUT", body, auth: true });
 live.uploadSkinBackground = (file) => request("/api/skin/background", { method: "POST", form: file, headers: { "Content-Type": file.type || "image/jpeg" }, auth: true });
 live.removeSkinBackground = () => request("/api/skin/background", { method: "DELETE", auth: true });
@@ -481,7 +494,7 @@ const api = DEMO_MODE ? demo : live;
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
-  getMe, getAnnouncement, checkLatest, getSkin, saveSkin, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
+  getMe, getAnnouncement, checkLatest, getSkin, saveSkin, aiChat, aiSend, aiClear, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
   pushKey, pushSubscribe, pushUnsubscribe,

@@ -181,3 +181,11 @@ npx.cmd wrangler deploy
 - **שליחה החוצה** (ל-Gmail וכו'): עובדת אחרי חיבור Resend (ראה למעלה).
 - **קבצים מצורפים**: עד 10MB לקובץ, עד 10 קבצים ועד 20MB בסך הכול להודעה. האחסון החינמי של Cloudflare KV מוגבל ל-1GB ולכ-1,000 העלאות ביום.
 - **התראות**: עובדות רק כשהאתר פתוח בלשונית כלשהי בדפדפן.
+
+## החדר הפרטי (צ'אט עם מוצ'י דרך Gemini)
+
+1. נכנסים ל-https://aistudio.google.com/apikey עם חשבון גוגל ולוחצים "Create API key". המפתח בחינם.
+2. ב-GitHub: Settings ← Secrets and variables ← Actions ← New repository secret.
+3. Name: `GEMINI_API_KEY`, Secret: המפתח שהעתקתם. שומרים.
+4. מפעילים מחדש את "Deploy server" (Actions ← Deploy server ← Run workflow), או פשוט מחכים לעדכון הבא.
+השרת בוחר לבד את מודל ה-Flash הכי חדש שזמין למפתח. אפשר לקבוע מודל מסוים עם המשתנה `GEMINI_MODEL`.

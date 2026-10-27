@@ -328,3 +328,13 @@ CREATE TABLE IF NOT EXISTS user_skins (
   sticker_token TEXT,
   updated_at INTEGER NOT NULL
 );
+
+-- The private room: a chat with Mochi (Gemini), kept per person.
+CREATE TABLE IF NOT EXISTS ai_chat (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_chat_user ON ai_chat (user_id, id);

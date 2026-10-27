@@ -110,15 +110,16 @@ body {
   --radius-xl: 1rem;
   --radius-2xl: 1.4rem;
   --radius-3xl: 2rem;
-  background: #fff0f6;
+  background: #ffe9f3;
 }
 :root[data-skin="noya"]:not(.dark) {
-  --color-surface: #fffafc;
-  --color-ink: #5b2a43;
-  --color-slate-50: #fff6fa;
-  --color-slate-100: #ffeef5;
-  --color-slate-200: #fbdce9;
-  --color-slate-300: #f2c1d5;
+  /* pink-white everywhere: cards are a whisper of pink, the page a little more */
+  --color-surface: #fff7fb;
+  --color-ink: #c2477f;
+  --color-slate-50: #ffeef6;
+  --color-slate-100: #ffe2ef;
+  --color-slate-200: #fbd0e2;
+  --color-slate-300: #f3b8d0;
   --color-slate-400: #b98aa0;
   --color-slate-500: #8f6a7c;
   --color-slate-600: #735566;
@@ -138,8 +139,8 @@ body {
 
 /* With a background picture, the page lets it show through softly. */
 :root[data-skin="noya"][data-skin-photo]:not(.dark) {
-  --color-slate-50: rgb(255 246 250 / 0.55);
-  --color-surface: rgb(255 250 252 / 0.9);
+  --color-slate-50: rgb(255 238 246 / 0.55);
+  --color-surface: rgb(255 247 251 / 0.88);
 }
 :root[data-skin="noya"][data-skin-photo] .bg-surface { backdrop-filter: blur(8px); }
 
@@ -200,3 +201,9 @@ body {
 .skin-mochi:hover svg { animation-duration: 0.9s; }
 @keyframes mochi-bob { 0%, 100% { transform: translateY(0) scale(1, 1); } 50% { transform: translateY(-6px) scale(1.03, 0.97); } }
 @media (prefers-reduced-motion: reduce) { .skin-mochi svg { animation: none; } }
+
+/* Headers and side menus get a soft pink-to-white wash. */
+:root[data-skin="noya"]:not(.dark) header.bg-surface { background: linear-gradient(90deg, #fff7fb, #ffe6f1); }
+:root[data-skin="noya"]:not(.dark) aside.bg-surface { background: linear-gradient(180deg, #fff7fb, #ffeef6); }
+:root[data-skin="noya"]:not(.dark) ::selection { background: #ffc6db; }
+:root[data-skin="noya"]:not(.dark) aside.bg-ink { background: linear-gradient(180deg, #e46aa0, #c2477f); }

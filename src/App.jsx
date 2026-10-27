@@ -9,6 +9,7 @@ import Privacy from "./pages/Privacy.jsx";
 import Settings from "./pages/Settings.jsx";
 import Drive from "./pages/Drive.jsx";
 import SharedFile from "./pages/SharedFile.jsx";
+import Room from "./pages/Room.jsx";
 import { useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
@@ -41,9 +42,10 @@ export default function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/drive" element={<Drive />} />
         <Route path="/share" element={<SharedFile />} />
+        <Route path="/room" element={<Room />} />
         <Route path="*" element={<Landing />} />
       </Routes>
-      {!onboarding && !pathname.startsWith("/admin") && <SupportWidget />}
+      {!onboarding && !pathname.startsWith("/admin") && !pathname.startsWith("/room") && <SupportWidget />}
     </>
   );
 }

@@ -12,6 +12,7 @@ import { MAX_CAP_GB, deleteAllDrive, driveCleanup, driveBackend, driveDefaultMb,
 import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAutoReply, tempAllowed, tempOwner, tempRoute } from "./extras.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
+import { aiRoute } from "./ai.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
@@ -828,6 +829,7 @@ async function route(req, env, log) {
     });
   }
 
+  if (path.startsWith("/api/ai/")) return aiRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, admin: isAdmin(env, user.username) });
   if (path.startsWith("/api/skin")) return skinRoute(req, env, path, url, user, { HttpError, json, readJson, randomHex, admin: isAdmin(env, user.username) });
 
   /* ---- Auto-reply ---- */

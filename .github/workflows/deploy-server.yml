@@ -2,7 +2,7 @@ name: Deploy server (Cloudflare Worker)
 
 # Uploads the mail server + Discord bot to Cloudflare whenever server/ changes.
 # Needs one GitHub secret: CLOUDFLARE_API_TOKEN (see server/SETUP-HE.md).
-# Optional secrets, copied to the Worker when present: RESEND_API_KEY, GOOGLE_CLIENT_SECRET, DISCORD_BOT_TOKEN.
+# Optional secrets, copied to the Worker when present: RESEND_API_KEY, GOOGLE_CLIENT_SECRET, DISCORD_BOT_TOKEN, GEMINI_API_KEY.
 
 on:
   push:
@@ -59,8 +59,9 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          for name in RESEND_API_KEY GOOGLE_CLIENT_SECRET DISCORD_BOT_TOKEN; do
+          for name in RESEND_API_KEY GOOGLE_CLIENT_SECRET DISCORD_BOT_TOKEN GEMINI_API_KEY; do
             value="${!name}"
             if [ -n "$value" ]; then
               printf '%s' "$value" | npx wrangler secret put "$name"

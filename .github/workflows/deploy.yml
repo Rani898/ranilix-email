@@ -30,7 +30,7 @@ jobs:
           # Set in GitHub → Settings → Secrets and variables → Actions → Variables (API_URL)
           VITE_API_URL: ${{ vars.API_URL || 'https://api.ranilix.com' }}
       # SPA fallback so /signup and /login work on refresh
-      - run: cp dist/index.html dist/404.html && for r in privacy inbox login signup settings drive share; do mkdir -p dist/$r && cp dist/index.html dist/$r/index.html; done
+      - run: cp dist/index.html dist/404.html && for r in privacy inbox login signup settings drive share room admin; do mkdir -p dist/$r && cp dist/index.html dist/$r/index.html; done
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

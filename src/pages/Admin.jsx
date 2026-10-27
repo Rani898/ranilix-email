@@ -98,6 +98,15 @@ function LookTab({ toast }) {
         <p className="mt-1 text-slate-600">{t("admin.look.intro")}</p>
       </div>
 
+      <Link to="/room" className="group flex items-center gap-4 rounded-2xl border border-slate-200 bg-gradient-to-l from-brand-50 to-surface p-5 transition hover:shadow-md">
+        <span className="transition group-hover:-rotate-6">{skin.sticker ? <img src={skinImage(skin.sticker)} alt="" className="h-14 w-14 object-contain" /> : <Mochi size={56} />}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-lg font-extrabold text-slate-900">{t("admin.look.roomTitle")}</span>
+          <span className="block text-sm text-slate-600">{t("admin.look.roomHint")}</span>
+        </span>
+        <span className="rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white">{t("admin.look.roomOpen")}</span>
+      </Link>
+
       <section className="rounded-2xl border border-slate-200 bg-surface p-5">
         <h2 className="font-bold text-slate-900">{t("admin.look.pickTitle")}</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
