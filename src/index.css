@@ -87,3 +87,116 @@ body {
   from { opacity: 0; transform: translateY(12px) scale(.98); }
   to { opacity: 1; transform: none; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Personal look "Noya": light pink, rounder, stitched frames, Mochi.  */
+/* Only for the person who chose it (see lib/skin.js).                 */
+/* ------------------------------------------------------------------ */
+:root[data-skin="noya"] {
+  --color-brand-50: #fff1f6;
+  --color-brand-100: #ffe1ec;
+  --color-brand-200: #ffc6db;
+  --color-brand-300: #ff9fc1;
+  --color-brand-400: #f973a5;
+  --color-brand-500: #ec4f8c;
+  --color-brand-600: #db2f74;
+  --color-brand-700: #be1f5f;
+  --color-brand-800: #9d1b50;
+  --color-brand-900: #831a46;
+  --color-chart: #db2f74;
+  --font-sans: "Varela Round", "Heebo", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Varela Round", "Heebo", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.4rem;
+  --radius-3xl: 2rem;
+  background: #fff0f6;
+}
+:root[data-skin="noya"]:not(.dark) {
+  --color-surface: #fffafc;
+  --color-ink: #5b2a43;
+  --color-slate-50: #fff6fa;
+  --color-slate-100: #ffeef5;
+  --color-slate-200: #fbdce9;
+  --color-slate-300: #f2c1d5;
+  --color-slate-400: #b98aa0;
+  --color-slate-500: #8f6a7c;
+  --color-slate-600: #735566;
+  --color-slate-700: #5b4150;
+  --color-slate-800: #47323e;
+  --color-slate-900: #3a2531;
+}
+:root[data-skin="noya"].dark {
+  --color-brand-50: #2a1220;
+  --color-brand-100: #3a1830;
+  --color-brand-200: #512041;
+  --color-brand-700: #ffa6c9;
+  --color-brand-800: #ffc6db;
+  background: #120b10;
+}
+:root[data-skin="noya"] body { background: transparent; }
+
+/* With a background picture, the page lets it show through softly. */
+:root[data-skin="noya"][data-skin-photo]:not(.dark) {
+  --color-slate-50: rgb(255 246 250 / 0.55);
+  --color-surface: rgb(255 250 252 / 0.9);
+}
+:root[data-skin="noya"][data-skin-photo] .bg-surface { backdrop-filter: blur(8px); }
+
+.skin-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* little hearts and stars on a soft pink wash */
+  background-color: #fff0f6;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cpath d='M24 30c-3-6-12-4-11 3 1 5 11 11 11 11s10-6 11-11c1-7-8-9-11-3z' fill='%23ffc6db'/%3E%3Cpath d='M88 82l2.4 6 6 2.4-6 2.4-2.4 6-2.4-6-6-2.4 6-2.4z' fill='%23ffd9a8'/%3E%3Ccircle cx='96' cy='22' r='3' fill='%23ffd6e7'/%3E%3Ccircle cx='30' cy='96' r='2.5' fill='%23e9d5ff'/%3E%3C/svg%3E"),
+    radial-gradient(1200px 700px at 100% 0%, #ffe1ec 0%, transparent 60%),
+    radial-gradient(900px 700px at 0% 100%, #f3e8ff 0%, transparent 60%);
+}
+:root[data-skin="noya"].dark .skin-backdrop { background-color: #120b10; background-image: radial-gradient(900px 600px at 100% 0%, #3a1830 0%, transparent 60%); }
+:root[data-skin="noya"][data-skin-photo] .skin-backdrop {
+  background-image: linear-gradient(rgb(255 240 246 / 0.35), rgb(255 240 246 / 0.35)), var(--skin-bg);
+  background-size: cover;
+  background-position: center;
+}
+:root[data-skin="noya"][data-skin-photo].dark .skin-backdrop { background-image: linear-gradient(rgb(18 11 16 / 0.6), rgb(18 11 16 / 0.6)), var(--skin-bg); }
+
+/* Stitched frames on cards and panels. */
+:root[data-skin="noya"] .rounded-2xl.border,
+:root[data-skin="noya"] .rounded-3xl.border {
+  border-style: dashed;
+  border-width: 2px;
+  border-color: var(--color-brand-200);
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 0.55), 0 14px 34px -18px rgb(219 47 116 / 0.45);
+}
+:root[data-skin="noya"].dark .rounded-2xl.border,
+:root[data-skin="noya"].dark .rounded-3xl.border { box-shadow: none; }
+
+/* A little sticker on the corner of the big frames: a bow-heart, or the picture chosen in the admin panel. */
+:root[data-skin="noya"] {
+  --skin-sticker: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 54C20 45 8 37 8 24a12 12 0 0 1 24-4 12 12 0 0 1 24 4c0 13-12 21-24 30z' fill='%23ff9fc1' stroke='%23db2f74' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M24 20c-6-6-14-2-11 4 2 4 9 3 11-1zm16 0c6-6 14-2 11 4-2 4-9 3-11-1z' fill='%23fff' stroke='%23db2f74' stroke-width='2.5' stroke-linejoin='round'/%3E%3Ccircle cx='32' cy='21' r='4' fill='%23fff' stroke='%23db2f74' stroke-width='2.5'/%3E%3C/svg%3E");
+}
+:root[data-skin="noya"] .rounded-3xl.border:not(.absolute):not(.fixed),
+:root[data-skin="noya"] .rounded-2xl.border.p-5:not(.absolute):not(.fixed),
+:root[data-skin="noya"] .rounded-2xl.border.p-6:not(.absolute):not(.fixed) { position: relative; }
+:root[data-skin="noya"] .rounded-3xl.border:not(.absolute):not(.fixed)::after,
+:root[data-skin="noya"] .rounded-2xl.border.p-5:not(.absolute):not(.fixed)::after,
+:root[data-skin="noya"] .rounded-2xl.border.p-6:not(.absolute):not(.fixed)::after {
+  content: "";
+  position: absolute;
+  top: -14px;
+  inset-inline-end: -10px;
+  width: 38px;
+  height: 38px;
+  background: var(--skin-sticker) center / contain no-repeat;
+  transform: rotate(12deg);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.skin-mochi svg { animation: mochi-bob 3.2s ease-in-out infinite; transform-origin: 50% 100%; filter: drop-shadow(0 8px 12px rgb(219 47 116 / 0.25)); }
+.skin-mochi:hover svg { animation-duration: 0.9s; }
+@keyframes mochi-bob { 0%, 100% { transform: translateY(0) scale(1, 1); } 50% { transform: translateY(-6px) scale(1.03, 0.97); } }
+@media (prefers-reduced-motion: reduce) { .skin-mochi svg { animation: none; } }

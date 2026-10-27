@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
+  Palette,
+  ImagePlus,
   ArrowLeft,
   Check,
   Copy,
@@ -37,7 +39,9 @@ import LogoMark from "../components/LogoMark.jsx";
 import Preferences from "../components/Preferences.jsx";
 import { AnnouncementBanner, Button, Modal, Toggle } from "../components/ui.jsx";
 import { getSession } from "../lib/session.js";
-import { getMe } from "../lib/api.js";
+import { getMe, removeSkinBackground, removeSkinSticker, saveSkin, uploadSkinBackground, uploadSkinSticker } from "../lib/api.js";
+import { applySkin, skinImage, useSkin } from "../lib/skin.js";
+import { Mochi } from "../components/SkinDecor.jsx";
 import { adminApi } from "../lib/adminApi.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
@@ -52,7 +56,121 @@ const TABS = [
   { id: "support", icon: LifeBuoy },
   { id: "reports", icon: Flag },
   { id: "settings", icon: Settings },
+  { id: "look", icon: Palette },
 ];
+
+/* ---------- My look (only for the admin who sets it) ---------- */
+
+const LOOKS = [
+  { id: "default", swatch: ["#2547ea", "#eef4ff", "#ffffff"] },
+  { id: "noya", swatch: ["#db2f74", "#ffc6db", "#fff0f6"] },
+];
+
+function LookTab({ toast }) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  const skin = useSkin();
+  const [nickname, setNickname] = useState(skin.nickname || "");
+  const [busy, setBusy] = useState("");
+  const file = useRef(null);
+  const stickerFile = useRef(null);
+  useEffect(() => { setNickname(skin.nickname || ""); }, [skin.nickname]);
+  const run = async (what, fn, done) => {
+    setBusy(what);
+    try { applySkin(await fn()); if (done) toast(done); } catch (e) { toast(errorText(e)); }
+    setBusy("");
+  };
+  const pick = (id) => run(id, () => saveSkin({ skin: id, ...(id === "noya" && !skin.nickname && !nickname ? { nickname: t("admin.look.defaultName") } : {}) }), t("admin.look.saved"));
+  const onFile = (kind) => (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { toast(t("admin.look.notImage")); return; }
+    const max = kind === "bg" ? 8 : 2;
+    if (f.size > max * 1024 * 1024) { toast(t("admin.look.tooBig", { mb: max })); return; }
+    const up = kind === "bg" ? uploadSkinBackground : uploadSkinSticker;
+    run(kind, async () => { const s = await up(f); return s.skin === "noya" ? s : saveSkin({ skin: "noya" }); }, t(kind === "bg" ? "admin.look.bgSaved" : "admin.look.stickerSaved"));
+  };
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-extrabold text-slate-900">{t("admin.look.title")}</h1>
+        <p className="mt-1 text-slate-600">{t("admin.look.intro")}</p>
+      </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+        <h2 className="font-bold text-slate-900">{t("admin.look.pickTitle")}</h2>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {LOOKS.map((l) => {
+            const on = (skin.skin || "default") === l.id;
+            return (
+              <button key={l.id} type="button" onClick={() => !on && pick(l.id)} disabled={!!busy} aria-pressed={on}
+                className={`relative flex items-center gap-4 rounded-2xl border-2 p-4 text-start transition ${on ? "border-brand-600 bg-brand-50" : "border-slate-200 hover:border-slate-300"}`}>
+                <span className="flex shrink-0 -space-x-2 rtl:space-x-reverse">
+                  {l.swatch.map((c) => <span key={c} className="h-9 w-9 rounded-full border-2 border-white shadow" style={{ background: c }} />)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-bold text-slate-900">{t(`admin.look.${l.id}`)}</span>
+                  <span className="block text-sm text-slate-500">{t(`admin.look.${l.id}Hint`)}</span>
+                </span>
+                {l.id === "noya" && <Mochi size={48} />}
+                {on && <span className="absolute -top-2 end-3 rounded-full bg-brand-600 px-2 py-0.5 text-xs font-bold text-white">{t("admin.look.active")}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+        <h2 className="font-bold text-slate-900">{t("admin.look.nameTitle")}</h2>
+        <p className="mt-1 text-sm text-slate-500">{t("admin.look.nameHint")}</p>
+        <form className="mt-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); run("name", () => saveSkin({ nickname }), t("admin.look.saved")); }}>
+          <input value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={30} placeholder={t("admin.look.defaultName")} aria-label={t("admin.look.nameTitle")}
+            className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-surface px-3 py-2.5 text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
+          <Button type="submit" disabled={!!busy}>{t("admin.look.saveName")}</Button>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+        <h2 className="font-bold text-slate-900">{t("admin.look.bgTitle")}</h2>
+        <p className="mt-1 text-sm text-slate-500">{t("admin.look.bgHint")}</p>
+        <div className="mt-4 grid aspect-[16/7] place-items-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 bg-cover bg-center"
+          style={skin.background ? { backgroundImage: `url("${skinImage(skin.background)}")` } : undefined}>
+          {!skin.background && <span className="flex flex-col items-center gap-1 text-sm text-slate-500"><ImagePlus className="h-7 w-7" aria-hidden="true" />{t("admin.look.noBg")}</span>}
+        </div>
+        <input ref={file} type="file" accept="image/*" className="hidden" onChange={onFile("bg")} />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button onClick={() => file.current?.click()} disabled={!!busy}>{busy === "bg" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}{t(skin.background ? "admin.look.changeBg" : "admin.look.addBg")}</Button>
+          {skin.background && <Button variant="ghost" disabled={!!busy} onClick={() => run("rmbg", () => removeSkinBackground(), t("admin.look.bgRemoved"))}>{t("admin.look.removeBg")}</Button>}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+        <h2 className="font-bold text-slate-900">{t("admin.look.stickerTitle")}</h2>
+        <p className="mt-1 text-sm text-slate-500">{t("admin.look.stickerHint")}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <span className="grid h-24 w-24 place-items-center rounded-2xl bg-brand-50">
+            {skin.sticker ? <img src={skinImage(skin.sticker)} alt="" className="h-20 w-20 object-contain" /> : <Mochi size={72} />}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <input ref={stickerFile} type="file" accept="image/png,image/webp,image/gif,image/jpeg" className="hidden" onChange={onFile("sticker")} />
+            <Button onClick={() => stickerFile.current?.click()} disabled={!!busy}>{busy === "sticker" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}{t(skin.sticker ? "admin.look.changeSticker" : "admin.look.addSticker")}</Button>
+            {skin.sticker && <Button variant="ghost" disabled={!!busy} onClick={() => run("rmst", () => removeSkinSticker(), t("admin.look.stickerRemoved"))}>{t("admin.look.removeSticker")}</Button>}
+          </div>
+        </div>
+      </section>
+
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-surface p-5">
+        <div>
+          <h2 className="font-bold text-slate-900">{t("admin.look.resetTitle")}</h2>
+          <p className="mt-1 text-sm text-slate-500">{t("admin.look.resetHint")}</p>
+        </div>
+        <Button variant="ghost" disabled={!!busy || (skin.skin || "default") === "default"} onClick={() => pick("default")}><RotateCcw className="h-4 w-4" />{t("admin.look.reset")}</Button>
+      </section>
+      <p className="text-xs text-slate-500">{t("admin.look.onlyYou")}</p>
+    </div>
+  );
+}
 
 /* ---------- small helpers ---------- */
 
@@ -1163,6 +1281,7 @@ export default function Admin() {
   useEffect(() => {
     if (!session) return;
     getMe().then((me) => {
+      if (me.skin) applySkin(me.skin);
       const staff = !me.isAdmin && !!me.isStaff;
       setAllowed(!!me.isAdmin || staff);
       setStaffOnly(staff);
@@ -1245,6 +1364,7 @@ export default function Admin() {
           {!staffOnly && tab === "users" && <UsersTab toast={toast} />}
           {!staffOnly && tab === "broadcast" && <BroadcastTab toast={toast} />}
           {!staffOnly && tab === "settings" && <SettingsTab toast={toast} />}
+          {!staffOnly && tab === "look" && <LookTab toast={toast} />}
           {tab === "support" && <SupportTab toast={toast} onCount={setSupportUnread} />}
           {tab === "reports" && <ReportsTab toast={toast} onCount={setOpenReports} />}
         </main>

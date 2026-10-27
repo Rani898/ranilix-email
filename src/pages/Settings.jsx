@@ -13,6 +13,7 @@ import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { bumpAvatars } from "../lib/avatars.js";
 import { enablePush, pushSupported, unlinkPush, useInstall } from "../lib/pwa.js";
 import { passwordChecks, PASSWORD_MIN } from "../lib/validation.js";
+import { applySkin } from "../lib/skin.js";
 import { AuthError, changePassword, deleteAccount, getAutoReply, getMe, getProfile, logOut, removeAvatar, saveAutoReply, setAvatar, updateProfile } from "../lib/api.js";
 
 /** Square-crop and shrink a picture to 256px JPEG in the browser (keeps uploads small). */
@@ -405,7 +406,7 @@ function Settings({ email }) {
 
   useEffect(() => {
     getProfile().then(setProfile).catch((e) => { if (e instanceof AuthError) onAuth(); else setProfile({ displayName: "", signature: "", hasAvatar: false }); });
-    getMe().then((me) => setIsAdmin(!!me.isAdmin)).catch(() => {});
+    getMe().then((me) => { setIsAdmin(!!me.isAdmin); if (me.skin) applySkin(me.skin); }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

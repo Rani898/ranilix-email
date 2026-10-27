@@ -11,6 +11,7 @@ import { supportAdminRoute, supportRoute } from "./support.js";
 import { MAX_CAP_GB, deleteAllDrive, driveCleanup, driveBackend, driveDefaultMb, driveRoute, driveShareRoute, maxQuotaBytes, quotaOf, siteUsed } from "./drive.js";
 import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAutoReply, tempAllowed, tempOwner, tempRoute } from "./extras.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
+import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
@@ -800,6 +801,12 @@ async function route(req, env, log) {
     if (res) return res;
   }
 
+  // The background picture of someone's personal look.
+  if (path.startsWith("/api/skin/bg/")) {
+    const res = await skinPublicRoute(req, env, path, { HttpError });
+    if (res) return res;
+  }
+
   // Public drive share links (anyone with the link).
   if (path.startsWith("/api/drive/s/") || path.startsWith("/api/drive/f/")) {
     const res = await driveShareRoute(req, env, path, { HttpError, rateLimit, json, sha256, randomHex, insertMessage, notifyUser });
@@ -817,8 +824,11 @@ async function route(req, env, log) {
     return json({
       email: user.email, isAdmin: admin, isStaff: !admin && (await isStaff(env, user.id)), accounts, profile: await getProfile(env, user.id),
       tempAllowed: await tempAllowed(env, user, admin), autoReplyOn: autoReplyActive(await getAutoReply(env, user.id)),
+      skin: await getSkin(env, user.id),
     });
   }
+
+  if (path.startsWith("/api/skin")) return skinRoute(req, env, path, url, user, { HttpError, json, readJson, randomHex, admin: isAdmin(env, user.username) });
 
   /* ---- Auto-reply ---- */
   if (path === "/api/auto-reply" && req.method === "GET") return json(await getAutoReply(env, user.id));

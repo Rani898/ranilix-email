@@ -13,6 +13,7 @@ import { useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
 import SupportWidget from "./components/SupportWidget.jsx";
+import SkinDecor from "./components/SkinDecor.jsx";
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -28,6 +29,7 @@ export default function App() {
   return (
     <>
       <ScrollToTop />
+      <SkinDecor />
       {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
       <Routes>
         <Route path="/" element={<Landing />} />

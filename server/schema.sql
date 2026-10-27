@@ -316,3 +316,15 @@ CREATE TABLE IF NOT EXISTS drive_share_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_share_requests ON drive_share_requests (share_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_share_requests_key ON drive_share_requests (key_hash);
+
+-- A personal look for the site (only for the person who picked it): colour set, nickname, background picture.
+CREATE TABLE IF NOT EXISTS user_skins (
+  user_id INTEGER PRIMARY KEY,
+  skin TEXT NOT NULL DEFAULT 'default',
+  nickname TEXT,
+  bg_key TEXT,
+  bg_token TEXT,
+  sticker_key TEXT,
+  sticker_token TEXT,
+  updated_at INTEGER NOT NULL
+);

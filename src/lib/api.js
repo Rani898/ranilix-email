@@ -143,6 +143,19 @@ const live = {
 };
 
 // Account info + site announcement
+const demoSkin = () => demoRead("skin", { skin: "default", nickname: "", background: null });
+demo.getSkin = async () => demoSkin();
+demo.saveSkin = async (body) => { const s = { ...demoSkin(), ...body }; demoWrite("skin", s); return s; };
+demo.uploadSkinBackground = async (file) => {
+  const background = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+  const s = { ...demoSkin(), background }; demoWrite("skin", s); return s;
+};
+demo.removeSkinBackground = async () => { const s = { ...demoSkin(), background: null }; demoWrite("skin", s); return s; };
+demo.uploadSkinSticker = async (file) => {
+  const sticker = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+  const s = { ...demoSkin(), sticker }; demoWrite("skin", s); return s;
+};
+demo.removeSkinSticker = async () => { const s = { ...demoSkin(), sticker: null }; demoWrite("skin", s); return s; };
 demo.getMe = async () => {
   const email = demoEmail();
   const ar = await demo.getAutoReply();
@@ -150,6 +163,7 @@ demo.getMe = async () => {
   return {
     email, isAdmin: email?.split("@")[0] === "rani", isStaff: false, accounts: { used: getAccounts().length, max: 5 }, profile: await demo.getProfile(),
     tempAllowed: true, autoReplyOn: !!(ar.enabled && ar.body && (!ar.startsAt || ar.startsAt <= now) && (!ar.endsAt || ar.endsAt > now)),
+    skin: demoSkin(),
   };
 };
 demo.getAnnouncement = async () => {
@@ -159,6 +173,12 @@ demo.getAnnouncement = async () => {
   } catch { return { enabled: false }; }
 };
 live.getMe = () => request("/api/me", { auth: true });
+live.getSkin = () => request("/api/skin", { auth: true });
+live.saveSkin = (body) => request("/api/skin", { method: "PUT", body, auth: true });
+live.uploadSkinBackground = (file) => request("/api/skin/background", { method: "POST", form: file, headers: { "Content-Type": file.type || "image/jpeg" }, auth: true });
+live.removeSkinBackground = () => request("/api/skin/background", { method: "DELETE", auth: true });
+live.uploadSkinSticker = (file) => request("/api/skin/sticker", { method: "POST", form: file, headers: { "Content-Type": file.type || "image/png" }, auth: true });
+live.removeSkinSticker = () => request("/api/skin/sticker", { method: "DELETE", auth: true });
 live.getAnnouncement = () => request("/api/announcement");
 // Cheap "is there new mail?" check: returns the id of the newest message.
 live.checkLatest = async () => (await request("/api/check", { auth: true })).latest;
@@ -461,7 +481,7 @@ const api = DEMO_MODE ? demo : live;
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
-  getMe, getAnnouncement, checkLatest,
+  getMe, getAnnouncement, checkLatest, getSkin, saveSkin, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
   pushKey, pushSubscribe, pushUnsubscribe,

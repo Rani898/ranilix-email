@@ -38,6 +38,8 @@ import LinkifiedText from "../components/LinkifiedText.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { enablePush, syncPush, unlinkPush } from "../lib/pwa.js";
+import { applySkin, useSkin } from "../lib/skin.js";
+import { Mochi } from "../components/SkinDecor.jsx";
 import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getAutoReply, getMe, listMessages, logOut, saveAutoReply, sendMessage, updateMessage } from "../lib/api.js";
 
 const TEMP_TO = /(^|[\s,;])tmp-[a-z0-9]{8}@/i;
@@ -97,6 +99,7 @@ export default function InboxPage() {
 
 function Inbox() {
   const { t, locale } = useI18n();
+  const skin = useSkin();
   const errorText = useErrorText();
   const session = getSession();
   const navigate = useNavigate();
@@ -203,7 +206,7 @@ function Inbox() {
   // Admin link (only shown to admins; the server still checks every admin request) + site banner.
   useEffect(() => {
     if (!email) return;
-    getMe().then((me) => { setIsAdmin(!!me.isAdmin); setIsStaff(!!me.isStaff); setAutoReplyOn(!!me.autoReplyOn); setTempAllowed(!!me.tempAllowed); if (me.accounts) setUsage(me.accounts); if (me.profile) setProfile(me.profile); }).catch(() => {});
+    getMe().then((me) => { if (me.skin) applySkin(me.skin); setIsAdmin(!!me.isAdmin); setIsStaff(!!me.isStaff); setAutoReplyOn(!!me.autoReplyOn); setTempAllowed(!!me.tempAllowed); if (me.accounts) setUsage(me.accounts); if (me.profile) setProfile(me.profile); }).catch(() => {});
     syncPush();
     getAnnouncement().then((a) => {
       let dismissed = "";
@@ -334,6 +337,11 @@ function Inbox() {
             <Link to="/admin#support" className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100" title={t("inbox.supportPanel")} aria-label={t("inbox.supportPanel")}>
               <Headset className="h-4 w-4 text-brand-600" /> <span className="hidden md:inline">{t("inbox.supportPanel")}</span>
             </Link>
+          )}
+          {skin.skin === "noya" && skin.nickname && (
+            <span className="hidden items-center gap-1.5 rounded-full border-2 border-dashed border-brand-200 bg-brand-50 py-0.5 pe-3 ps-1 text-sm font-bold text-brand-700 md:inline-flex">
+              <Mochi size={26} /> {t("skin.hiName", { name: skin.nickname })}
+            </span>
           )}
           <Preferences compact className="hidden sm:flex" />
           <span dir="ltr" className="hidden max-w-[14rem] truncate text-sm font-medium text-slate-600 xl:block">{email}</span>
