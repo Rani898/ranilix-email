@@ -9,11 +9,11 @@ export const CATEGORIES = ["food", "ride", "home", "shop", "subs", "other"];
 // What the shop is. Brand names (in the sender's name or address) decide first, so every receipt
 // from the same shop gets the same category; words in the subject only help for unknown shops.
 const BRANDS = [
-  ["subs", /netflix|spotify|apple\.com|itunes|icloud|google ?(one|play)|youtube|disney|hbo|primevideo|prime video|deezer|openai|chatgpt|xbox|playstation|nintendo|steampowered|steam|patreon|canva|adobe|microsoft|dropbox|crunchyroll|duolingo/i],
+  ["subs", /proton|nordvpn|expressvpn|surfshark|netflix|spotify|apple\.com|itunes|icloud|google ?(one|play)|youtube|disney|hbo|primevideo|prime video|deezer|openai|chatgpt|xbox|playstation|nintendo|steampowered|steam|patreon|canva|adobe|microsoft|dropbox|crunchyroll|duolingo/i],
   ["food", /wolt|10bis|tenbis|תן ביס|cibus|סיבוס|pluxee|שופרסל|shufersal|רמי לוי|rami-?levy|יוחננוף|yochananof|victory|ויקטורי|אושר עד|osherad|טיב טעם|tivtaam|carrefour|קרפור|מקדונלד|mcdonald|דומינו|domino|pizza ?hut|aroma|ארומה|starbucks|burger ?king|kfc|japanika|ג'פניקה/i],
   ["ride", /רב[- ]?קו|rav[- ]?kav|ravkav|moovit|gett|yango|uber|bolt\.eu|\bpaz\b|פז\b|דלק|delek|sonol|סונול|דור אלון|doralon|rail\.co\.il|רכבת ישראל|אגד|egged|pango|פנגו|cellopark|סלופארק|כביש 6|kvish6|elal|אל על|wizzair|ryanair|easyjet/i],
   ["home", /חברת החשמל|iec\.co\.il|electric|מקורות|מי |water|בזק|bezeq|פרטנר|partner|סלקום|cellcom|\bhot\b|hot\.net|yes\.co\.il|גולן טלקום|golan|wecom|ארנונה|עיריית|municipal|אמישראגז|supergas|סופרגז|ביטוח|insurance|migdal|harel|הראל|מגדל|clal|כלל/i],
-  ["shop", /aliexpress|alibaba|amazon|ebay|shein|temu|ikea|איקאה|\bksp\b|ivory|איבורי|\bbug\b|באג|zara|h&m|hm\.com|next\.co|terminalx|terminal x|טרמינל|asos|walla ?shops|וואלה שופס|super-?pharm|סופר-?פארם|be ?pharm|nike|adidas|castro|קסטרו|fox|פוקס|max ?stock|מקס סטוק|ace\.co|home ?center|הום סנטר|kravitz|קרביץ|apple store|samsung|xiaomi|etsy|wish\.com/i],
+  ["shop", /eldorado|g2a|kinguin|eneba|gamivo|instant-?gaming|humble|epicgames|epic games|roblox|playerauctions|g2g|aliexpress|alibaba|amazon|ebay|shein|temu|ikea|איקאה|\bksp\b|ivory|איבורי|\bbug\b|באג|zara|h&m|hm\.com|next\.co|terminalx|terminal x|טרמינל|asos|walla ?shops|וואלה שופס|super-?pharm|סופר-?פארם|be ?pharm|nike|adidas|castro|קסטרו|fox|פוקס|max ?stock|מקס סטוק|ace\.co|home ?center|הום סנטר|kravitz|קרביץ|apple store|samsung|xiaomi|etsy|wish\.com/i],
 ];
 const SUBJECT_HINTS = [
   ["subs", /מנוי|subscription|renew|membership/i],
@@ -124,11 +124,6 @@ async function saveReceipt(env, userId, source, extId, date, found, extra = {}) 
   const key = storeKey(found.domain, found.store);
   const rule = await env.DB.prepare("SELECT category FROM store_categories WHERE user_id = ? AND store_key = ?").bind(userId, key).first();
   if (rule) found = { ...found, category: rule.category };
-  else if (!brandCategory(`${found.store} ${found.domain}`)) {
-    const earlier = await env.DB.prepare(`SELECT r.category, COUNT(*) AS n FROM receipts r LEFT JOIN receipt_domains d ON d.receipt_id = r.id
-      WHERE r.user_id = ? AND (d.domain = ? OR lower(r.store) = ?) GROUP BY r.category ORDER BY n DESC LIMIT 1`).bind(userId, found.domain || "-", String(found.store).toLowerCase()).first();
-    if (earlier) found = { ...found, category: earlier.category };
-  }
   const res = await env.DB.prepare(`INSERT OR IGNORE INTO receipts (user_id, source, ext_id, store, what, category, amount_cents, currency, date, message_id, gmail_id, hidden, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`)
     .bind(userId, source, String(extId), found.store, found.what, found.category, found.amountCents, found.currency, date,
@@ -143,7 +138,7 @@ async function saveReceipt(env, userId, source, extId, date, found, extra = {}) 
  * from their subject). A category the person chose wins; then the shop's known brand; then the most common.
  */
 async function harmonize(env, userId) {
-  const { results: rows } = await env.DB.prepare(`SELECT r.id, r.store, r.category, COALESCE(d.domain, (SELECT m.from_addr FROM messages m WHERE m.id = r.message_id)) AS dom
+  const { results: rows } = await env.DB.prepare(`SELECT r.id, r.store, r.what, r.category, COALESCE(d.domain, (SELECT m.from_addr FROM messages m WHERE m.id = r.message_id)) AS dom
     FROM receipts r LEFT JOIN receipt_domains d ON d.receipt_id = r.id WHERE r.user_id = ? LIMIT 3000`).bind(userId).all();
   const results = rows.map((r) => ({ ...r, domain: baseDomain(r.dom || "") }));
   const { results: rules } = await env.DB.prepare("SELECT store_key, category FROM store_categories WHERE user_id = ?").bind(userId).all();
@@ -157,15 +152,36 @@ async function harmonize(env, userId) {
   for (const [k, list] of groups) {
     let want = ruleOf.get(k) || brandCategory(`${list[0].store} ${list[0].domain || ""}`);
     if (!want) {
+      // Unknown shop: guess again from each receipt's subject (not from older guesses) and take the most common.
       const count = {};
-      for (const r of list) count[r.category] = (count[r.category] || 0) + 1;
-      want = Object.entries(count).sort((a, b) => b[1] - a[1])[0][0];
+      for (const r of list) { const c = categoryOf(`${r.store} ${r.domain || ""}`, r.what || ""); count[c] = (count[c] || 0) + 1; }
+      want = Object.entries(count).sort((a, b) => ((b[0] !== "other") - (a[0] !== "other")) || (b[1] - a[1]))[0][0];
     }
     const wrong = list.filter((r) => r.category !== want).map((r) => r.id);
     for (let i = 0; i < wrong.length; i += 90) {
       const part = wrong.slice(i, i + 90);
       await env.DB.prepare(`UPDATE receipts SET category = ? WHERE user_id = ? AND id IN (${part.map(() => "?").join(",")})`).bind(want, userId, ...part).run();
     }
+  }
+}
+
+/** Gmail receipts saved before we kept the shop's address: look up the sender once (for the logo and grouping). */
+async function backfillDomains(env, userId, h) {
+  const { results } = await env.DB.prepare(`SELECT r.id, r.gmail_id FROM receipts r LEFT JOIN receipt_domains d ON d.receipt_id = r.id
+    WHERE r.user_id = ? AND r.source = 'gmail' AND r.gmail_id IS NOT NULL AND d.receipt_id IS NULL LIMIT 60`).bind(userId).all();
+  if (!results.length) return;
+  const fail = (status, message, code) => { throw new h.HttpError(status, message, code); };
+  for (let i = 0; i < results.length; i += 10) {
+    await Promise.all(results.slice(i, i + 10).map(async (r) => {
+      try {
+        const m = await gmailCall(env, userId, `messages/${r.gmail_id}?format=metadata&metadataHeaders=From`, fail);
+        const from = (m.payload?.headers || []).find((x) => x.name.toLowerCase() === "from")?.value || "";
+        const addr = (/<([^>]+)>/.exec(from) || [null, from])[1];
+        const domain = baseDomain(addr);
+        // Remember even "no address" so we don't ask again.
+        await env.DB.prepare("INSERT OR REPLACE INTO receipt_domains (receipt_id, domain) VALUES (?, ?)").bind(r.id, domain || "").run();
+      } catch { /* try again another time */ }
+    }));
   }
 }
 
@@ -359,11 +375,12 @@ export async function receiptsRoute(req, env, path, url, user, h) {
 
   if (path === "/api/receipts" && req.method === "GET") {
     const key = /^\d{4}-\d{2}$/.test(url.searchParams.get("month") || "") ? url.searchParams.get("month") : thisMonth();
+    const connected = await env.DB.prepare("SELECT google_email FROM google_accounts WHERE user_id = ?").bind(user.id).first();
+    if (connected) await backfillDomains(env, user.id, h).catch(() => {});
     await harmonize(env, user.id);
     const data = await monthData(env, user.id, key);
     const prev = await monthData(env, user.id, shiftMonth(key, -1));
     const p = await prefs(env, user.id);
-    const connected = await env.DB.prepare("SELECT google_email FROM google_accounts WHERE user_id = ?").bind(user.id).first();
     return json({ ...data, prevTotal: prev.totals.ILS || 0, summaryOn: p.summary, lastScan: p.lastScan, gmail: connected ? connected.google_email || true : false });
   }
 
