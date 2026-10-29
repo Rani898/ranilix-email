@@ -223,6 +223,7 @@ export default {
     back: "Back to home",
   },
   settings: {
+    deleteByTeam: "Want to delete your account? Only the Ranilix team can delete accounts. Write to us in the support chat (the bubble in the corner) and we'll take care of it.",
     autoReply: {
       title: "Auto-reply",
       desc: "On vacation or busy? People who write to you get an automatic answer.",
@@ -839,6 +840,7 @@ export default {
     google_not_connected: "Connect your Google account first.",
     google_reconnect: "Google asked you to sign in again. Please reconnect.",
     google_failed: "Gmail didn't answer. Please try again.",
+    self_delete_off: "Accounts are deleted by the Ranilix team. Write to us in the support chat.",
     receipts_none: "No receipts in that month.",
     event_title: "Give the event a name.",
     event_date: "Pick a date.",

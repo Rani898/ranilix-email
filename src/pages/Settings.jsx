@@ -440,7 +440,8 @@ function Settings({ email }) {
             <AutoReplySection onAuth={onAuth} />
             <AppSection />
             <PasswordSection onAuth={onAuth} />
-            <DeleteSection email={email} isAdmin={isAdmin} onDeleted={onDeleted} onAuth={onAuth} />
+            {/* Deleting an account is done only by the team, from the admin panel. */}
+            <p className="rounded-2xl border border-slate-200 bg-surface px-5 py-4 text-sm leading-relaxed text-slate-600">{t("settings.deleteByTeam")}</p>
           </>
         )}
       </main>

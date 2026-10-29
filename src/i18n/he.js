@@ -223,6 +223,7 @@ export default {
     back: "חזרה לדף הבית",
   },
   settings: {
+    deleteByTeam: "רוצים למחוק את החשבון? רק צוות Ranilix יכול למחוק חשבונות. כתבו לנו בצ'אט התמיכה (הבועה בפינה) ונטפל בזה.",
     autoReply: {
       title: "מענה אוטומטי",
       desc: "בחופשה או עסוקים? מי שכותב לכם יקבל תשובה אוטומטית.",
@@ -839,6 +840,7 @@ export default {
     google_not_connected: "קודם צריך לחבר את חשבון ה-Google.",
     google_reconnect: "Google ביקשה להתחבר מחדש. חברו שוב את החשבון.",
     google_failed: "Gmail לא ענה. נסו שוב.",
+    self_delete_off: "מחיקת חשבון נעשית רק על ידי צוות Ranilix. כתבו לנו בצ'אט התמיכה.",
     receipts_none: "אין קבלות בחודש הזה.",
     event_title: "תנו לאירוע שם.",
     event_date: "בחרו תאריך.",

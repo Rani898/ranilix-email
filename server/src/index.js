@@ -919,6 +919,10 @@ async function route(req, env, log) {
     return json({ ok: true });
   }
   if (path === "/api/account/delete" && req.method === "POST") {
+    // Only the team deletes accounts (from the admin panel): people were deleting and opening
+    // addresses again and again.
+    throw new HttpError(403, "Accounts are deleted by the Ranilix team. Write to support.", "self_delete_off");
+    // eslint-disable-next-line no-unreachable
     const { password } = await readJson(req);
     await rateLimit(env, `del:${user.id}`, 10, 3600 * 1000);
     if (isAdmin(env, user.username)) throw new HttpError(400, "Admins can't delete their account here.", "admin_protected");
