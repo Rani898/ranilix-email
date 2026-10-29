@@ -7,6 +7,8 @@ import {
   BellRing,
   Forward,
   HardDrive,
+  CalendarDays,
+  ReceiptText,
   Headset,
   Hourglass,
   Palmtree,
@@ -33,6 +35,8 @@ import GmailView, { GoogleMark } from "../components/GmailView.jsx";
 import Preferences from "../components/Preferences.jsx";
 import Compose from "../components/Compose.jsx";
 import { AttachmentList } from "../components/Attachments.jsx";
+import { InviteCard, SummaryCard } from "../components/MailCards.jsx";
+import { EVENT_COLORS } from "../lib/money.js";
 import { AnnouncementBanner } from "../components/ui.jsx";
 import LinkifiedText from "../components/LinkifiedText.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
@@ -40,6 +44,7 @@ import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { enablePush, syncPush, unlinkPush } from "../lib/pwa.js";
 import { applySkin, useSkin } from "../lib/skin.js";
 import { Mochi } from "../components/SkinDecor.jsx";
+import { events as loadEvents } from "../lib/api.js";
 import { AuthError, checkLatest, deleteMessage as apiDelete, getAnnouncement, getAutoReply, getMe, listMessages, logOut, saveAutoReply, sendMessage, updateMessage } from "../lib/api.js";
 
 const TEMP_TO = /(^|[\s,;])tmp-[a-z0-9]{8}@/i;
@@ -214,6 +219,29 @@ function Inbox() {
       if (a.enabled && a.text && a.text !== dismissed) setBanner(a);
     }).catch(() => {});
   }, [email]);
+
+  // Coming from another page with ?open=<message id> (e.g. a receipt): open that message.
+  useEffect(() => {
+    const want = params.get("open");
+    if (!want || !messages.length) return;
+    const m = messages.find((x) => x.id === want);
+    if (m) { setFolder(m.folder === "sent" ? "sent" : m.folder === "trash" ? "trash" : "inbox"); setOpenId(m.id); }
+    setParams({}, { replace: true });
+  }, [params, messages, setParams]);
+
+  // The next thing in the calendar, shown under the menu.
+  const [nextEvent, setNextEvent] = useState(null);
+  useEffect(() => {
+    const now = Date.now();
+    loadEvents(now, now + 14 * 24 * 3600 * 1000).then((r) => setNextEvent(r.events.find((e) => e.end >= now) || null)).catch(() => {});
+  }, [email]);
+  const nextEventWhen = nextEvent ? (() => {
+    const d = new Date(nextEvent.start);
+    const today = new Date();
+    const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
+    const day = d.toDateString() === today.toDateString() ? t("calendar.todayShort") : d.toDateString() === tomorrow.toDateString() ? t("calendar.tomorrow") : d.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
+    return nextEvent.allDay ? day : `${day} · ${d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}`;
+  })() : "";
 
   // Back from Google's sign-in screen: open the Gmail folder and say how it went.
   useEffect(() => {
@@ -407,6 +435,23 @@ function Inbox() {
             <HardDrive className="h-5 w-5 text-brand-600" aria-hidden="true" />
             <span className="flex-1 text-start">{t("drive.title")}</span>
           </Link>
+          <Link to="/calendar" className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+            <CalendarDays className="h-5 w-5 text-brand-600" aria-hidden="true" />
+            <span className="flex-1 text-start">{t("calendar.title")}</span>
+          </Link>
+          <Link to="/receipts" className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+            <ReceiptText className="h-5 w-5 text-brand-600" aria-hidden="true" />
+            <span className="flex-1 text-start">{t("receipts.title")}</span>
+          </Link>
+          {nextEvent && (
+            <Link to="/calendar" className="mt-3 flex items-start gap-2.5 rounded-xl border border-slate-200 bg-surface p-3 hover:bg-slate-50">
+              <span className="mt-1 h-8 w-1 shrink-0 rounded-full" style={{ background: EVENT_COLORS[nextEvent.color]?.bar }} />
+              <span className="min-w-0">
+                <span className="block text-xs font-bold text-brand-700">{nextEventWhen}</span>
+                <span className="block truncate text-sm font-semibold text-slate-800"><bdi>{nextEvent.title}</bdi></span>
+              </span>
+            </Link>
+          )}
 
           <div className="mt-6 space-y-3">
             {permission === "default" && (
@@ -553,7 +598,9 @@ function Inbox() {
                   )}
                 </div>
               </div>
-              <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]"><LinkifiedText text={open.body} /></div>
+              {open.card?.kind === "monthly_summary" ? <SummaryCard data={open.card.data} />
+                : <div dir="auto" className="mt-6 whitespace-pre-wrap break-words leading-relaxed text-slate-800 [unicode-bidi:plaintext]"><LinkifiedText text={open.body} /></div>}
+              {open.folder !== "sent" && <InviteCard message={open} onToast={setToast} />}
               <AttachmentList attachments={open.attachments} onError={setToast} onSaved={setToast} />
 
               <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-200 pt-5">

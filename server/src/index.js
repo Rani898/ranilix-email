@@ -13,6 +13,8 @@ import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAuto
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
+import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
+import { calendarRoute } from "./calendar.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
@@ -347,6 +349,12 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM temp_addresses WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM temp_access WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM staff_roles WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM receipts WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM money_prefs WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM message_cards WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM events WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM ai_chat WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM user_skins WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
   ]);
   await cleanupFiles(env, atts.map((a) => a.kv_key));
@@ -829,6 +837,9 @@ async function route(req, env, log) {
     });
   }
 
+  if (path.startsWith("/api/receipts")) return receiptsRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, htmlToText, insertMessage, notifyUser });
+  if (path.startsWith("/api/events")) return calendarRoute(req, env, path, url, user, { HttpError, json, readJson });
+
   if (path.startsWith("/api/ai/")) return aiRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
   if (path.startsWith("/api/skin")) return skinRoute(req, env, path, url, user, { HttpError, json, readJson, randomHex, admin: isAdmin(env, user.username) });
 
@@ -965,7 +976,9 @@ async function route(req, env, log) {
       if (!byMessage.has(a.message_id)) byMessage.set(a.message_id, []);
       byMessage.get(a.message_id).push(a);
     }
-    return json({ messages: results.map((m) => toClientMessage(m, byMessage.get(m.id))) });
+    const { results: cards } = await env.DB.prepare("SELECT message_id, kind, data FROM message_cards WHERE user_id = ?").bind(user.id).all();
+    const cardOf = new Map(cards.map((c) => { try { return [c.message_id, { kind: c.kind, data: JSON.parse(c.data) }]; } catch { return [c.message_id, null]; } }));
+    return json({ messages: results.map((m) => ({ ...toClientMessage(m, byMessage.get(m.id)), card: cardOf.get(m.id) || null })) });
   }
 
   const msgMatch = path.match(/^\/api\/messages\/(\d+)$/);
@@ -1218,6 +1231,7 @@ export default {
       date: parsed.date ? Date.parse(parsed.date) || Date.now() : Date.now(),
     });
     await linkAttachments(env, user.id, messageId, kept);
+    await noteReceipt(env, user.id, messageId, { fromName, fromAddr, subject: parsed.subject || "", text: body, date: parsed.date ? Date.parse(parsed.date) || Date.now() : Date.now() });
     await notifyUser(env, user.id);
     // Never auto-answer mail sent to a temporary address (that would reveal the real one).
     if (!isTemp) {
@@ -1238,5 +1252,7 @@ export default {
     await env.DB.prepare("DELETE FROM temp_addresses WHERE expires_at < ?").bind(now - 7 * DAY).run();
     await env.DB.prepare("DELETE FROM auto_reply_log WHERE sent_at < ?").bind(now - 30 * DAY).run();
     await driveCleanup(env);
+    await env.DB.prepare("DELETE FROM message_cards WHERE message_id NOT IN (SELECT id FROM messages)").run();
+    await monthlySummaries(env, { insertMessage, notifyUser });
   },
 };

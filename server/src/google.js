@@ -76,6 +76,52 @@ function summary(m) {
   };
 }
 
+/* ---------- Gmail access (shared with other features, e.g. receipts) ---------- */
+
+async function tokenFor(env, userId, fail) {
+  const row = await env.DB.prepare("SELECT * FROM google_accounts WHERE user_id = ?").bind(userId).first();
+  if (!row) fail(409, "Connect your Google account first.", "google_not_connected");
+  if (row.access_enc && row.access_expires > Date.now() + 60_000) return open(env, row.access_enc);
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      refresh_token: await open(env, row.refresh_enc),
+      grant_type: "refresh_token",
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) {
+    // Revoked, or expired (in Google's "testing" mode refresh tokens last 7 days).
+    await env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId).run();
+    fail(409, "Google asked to sign in again. Please reconnect.", "google_reconnect");
+  }
+  await env.DB.prepare("UPDATE google_accounts SET access_enc = ?, access_expires = ? WHERE user_id = ?")
+    .bind(await seal(env, data.access_token), Date.now() + (data.expires_in || 3600) * 1000, userId).run();
+  return data.access_token;
+}
+
+/** GET a Gmail API path for the user ("messages?q=..."). `fail(status, message, code)` throws. */
+export async function gmailCall(env, userId, apiPath, fail) {
+  const token = await tokenFor(env, userId, fail);
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${apiPath}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 401) {
+    await env.DB.prepare("UPDATE google_accounts SET access_enc = NULL, access_expires = 0 WHERE user_id = ?").bind(userId).run();
+    fail(409, "Google asked to sign in again. Please reconnect.", "google_reconnect");
+  }
+  if (!res.ok) fail(502, "Gmail didn't answer. Please try again.", "google_failed");
+  return res.json();
+}
+
+/** A full Gmail message (format=full) as { id, from, subject, date, text, html, attachments }. */
+export function gmailMessage(m) {
+  const parts = { text: "", html: "", attachments: [] };
+  walk(m.payload, parts);
+  return { ...summary(m), text: parts.text, html: parts.html, attachments: parts.attachments };
+}
+
 /* ---------- routes ---------- */
 
 /**
@@ -85,41 +131,8 @@ function summary(m) {
 export async function googleRoute(req, env, path, url, user, { HttpError, json, htmlToText, randomHex, log = () => {} }) {
   const fail = (status, message, code) => { throw new HttpError(status, message, code); };
 
-  async function accessToken(userId) {
-    const row = await env.DB.prepare("SELECT * FROM google_accounts WHERE user_id = ?").bind(userId).first();
-    if (!row) fail(409, "Connect your Google account first.", "google_not_connected");
-    if (row.access_enc && row.access_expires > Date.now() + 60_000) return open(env, row.access_enc);
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: env.GOOGLE_CLIENT_ID,
-        client_secret: env.GOOGLE_CLIENT_SECRET,
-        refresh_token: await open(env, row.refresh_enc),
-        grant_type: "refresh_token",
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.access_token) {
-      // Revoked, or expired (in Google's "testing" mode refresh tokens last 7 days).
-      await env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId).run();
-      fail(409, "Google asked to sign in again. Please reconnect.", "google_reconnect");
-    }
-    await env.DB.prepare("UPDATE google_accounts SET access_enc = ?, access_expires = ? WHERE user_id = ?")
-      .bind(await seal(env, data.access_token), Date.now() + (data.expires_in || 3600) * 1000, userId).run();
-    return data.access_token;
-  }
-
-  async function gmail(userId, apiPath) {
-    const token = await accessToken(userId);
-    const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${apiPath}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (res.status === 401) {
-      await env.DB.prepare("UPDATE google_accounts SET access_enc = NULL, access_expires = 0 WHERE user_id = ?").bind(userId).run();
-      fail(409, "Google asked to sign in again. Please reconnect.", "google_reconnect");
-    }
-    if (!res.ok) fail(502, "Gmail didn't answer. Please try again.", "google_failed");
-    return res.json();
-  }
+  const accessToken = (userId) => tokenFor(env, userId, fail);
+  const gmail = (userId, apiPath) => gmailCall(env, userId, apiPath, fail);
 
   // ---- OAuth callback (no Ranilix session) ----
   if (path === "/api/google/callback" && req.method === "GET") {

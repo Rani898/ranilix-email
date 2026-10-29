@@ -338,3 +338,58 @@ CREATE TABLE IF NOT EXISTS ai_chat (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_chat_user ON ai_chat (user_id, id);
+
+-- Receipts found in mail (Ranilix inbox and connected Gmail), for the spending summary.
+CREATE TABLE IF NOT EXISTS receipts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  ext_id TEXT NOT NULL,
+  store TEXT NOT NULL,
+  what TEXT,
+  category TEXT NOT NULL DEFAULT 'other',
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'ILS',
+  date INTEGER NOT NULL,
+  message_id INTEGER,
+  gmail_id TEXT,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_ext ON receipts (user_id, source, ext_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_user_date ON receipts (user_id, date);
+
+CREATE TABLE IF NOT EXISTS money_prefs (
+  user_id INTEGER PRIMARY KEY,
+  monthly_summary INTEGER NOT NULL DEFAULT 1,
+  last_summary TEXT,
+  last_scan INTEGER
+);
+
+-- A designed card shown instead of the plain text of a message (e.g. the monthly summary).
+CREATE TABLE IF NOT EXISTS message_cards (
+  message_id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_message_cards_user ON message_cards (user_id);
+
+-- The small calendar.
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  all_day INTEGER NOT NULL DEFAULT 0,
+  color TEXT NOT NULL DEFAULT 'blue',
+  location TEXT,
+  notes TEXT,
+  rsvp TEXT,
+  source TEXT NOT NULL DEFAULT 'manual',
+  message_id INTEGER,
+  uid TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_user_time ON events (user_id, starts_at);

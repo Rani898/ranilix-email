@@ -145,6 +145,33 @@ const live = {
 // Account info + site announcement
 const demoSkin = () => demoRead("skin", { skin: "default", nickname: "", background: null });
 demo.getSkin = async () => demoSkin();
+demo.receipts = async (month) => {
+  const now = new Date();
+  const key = month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const [y, m] = key.split("-").map(Number);
+  const day = (d) => new Date(y, m - 1, d, 12).getTime();
+  const all = demoRead("receipts", null) || [
+    { id: "1", source: "gmail", store: "Wolt", what: "הקבלה שלך מ-Wolt", category: "food", amount: 86.9, currency: "ILS", d: 25, files: 1 },
+    { id: "2", source: "ranilix", store: "שופרסל", what: "חשבונית מס/קבלה", category: "food", amount: 412.3, currency: "ILS", d: 23, files: 1 },
+    { id: "3", source: "gmail", store: "AliExpress", what: "Order confirmation", category: "shop", amount: 17.3, currency: "USD", d: 21, files: 0 },
+    { id: "4", source: "ranilix", store: "Spotify", what: "Your receipt", category: "subs", amount: 21.9, currency: "ILS", d: 18, files: 0 },
+    { id: "5", source: "ranilix", store: "חברת החשמל", what: "קבלה על תשלום", category: "home", amount: 318, currency: "ILS", d: 12, files: 1 },
+    { id: "6", source: "gmail", store: "רב-קו", what: "אישור טעינה", category: "ride", amount: 225, currency: "ILS", d: 9, files: 0 },
+  ];
+  const receipts = all.map((r) => ({ hidden: false, messageId: null, gmailId: null, ...r, date: day(r.d) }));
+  const shown = receipts.filter((r) => !r.hidden);
+  const totals = {}; const byCat = {};
+  for (const r of shown) { totals[r.currency] = (totals[r.currency] || 0) + r.amount; if (r.currency === "ILS") byCat[r.category] = (byCat[r.category] || 0) + r.amount; }
+  return { month: key, receipts, totals, byCategory: Object.entries(byCat).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount), count: shown.length, prevTotal: 980, summaryOn: demoRead("rsum", true), lastScan: Date.now(), gmail: "demo@gmail.com" };
+};
+demo.receiptsScan = async () => { await delay(600); return { ranilix: 0, gmail: 0, gmailConnected: true }; };
+demo.receiptsSettings = async (summary) => { demoWrite("rsum", !!summary); return { summaryOn: !!summary }; };
+demo.receiptsSendSummary = async () => ({ ok: true });
+demo.receiptUpdate = async () => ({ ok: true });
+demo.events = async (from, to) => ({ events: demoRead("events", []).filter((e) => e.end >= from && e.start < to) });
+demo.eventCreate = async (body) => { const list = demoRead("events", []); const e = { id: String(Date.now()), color: "blue", location: "", notes: "", source: "manual", ...body, end: body.end || body.start }; demoWrite("events", [...list, e]); return e; };
+demo.eventUpdate = async (id, body) => { const list = demoRead("events", []).map((e) => (e.id === id ? { ...e, ...body } : e)); demoWrite("events", list); return list.find((e) => e.id === id); };
+demo.eventDelete = async (id) => { demoWrite("events", demoRead("events", []).filter((e) => e.id !== id)); return { ok: true }; };
 demo.aiChat = async () => ({ ready: true, messages: demoRead("ai", []) });
 demo.aiSend = async (text) => {
   await delay(700);
@@ -185,6 +212,15 @@ demo.getAnnouncement = async () => {
 live.getMe = () => request("/api/me", { auth: true });
 live.getSkin = () => request("/api/skin", { auth: true });
 live.aiChat = () => request("/api/ai/chat", { auth: true });
+live.receipts = (month) => request(`/api/receipts${month ? `?month=${encodeURIComponent(month)}` : ""}`, { auth: true });
+live.receiptsScan = () => request("/api/receipts/scan", { method: "POST", auth: true });
+live.receiptsSettings = (summary) => request("/api/receipts/settings", { method: "PUT", body: { summary }, auth: true });
+live.receiptsSendSummary = (month) => request("/api/receipts/summary", { method: "POST", body: { month }, auth: true });
+live.receiptUpdate = (id, patch) => request(`/api/receipts/${encodeURIComponent(id)}`, { method: "PATCH", body: patch, auth: true });
+live.events = (from, to) => request(`/api/events?from=${from}&to=${to}`, { auth: true });
+live.eventCreate = (body) => request("/api/events", { method: "POST", body, auth: true });
+live.eventUpdate = (id, body) => request(`/api/events/${encodeURIComponent(id)}`, { method: "PATCH", body, auth: true });
+live.eventDelete = (id) => request(`/api/events/${encodeURIComponent(id)}`, { method: "DELETE", auth: true });
 live.aiSend = (text) => request("/api/ai/chat", { method: "POST", body: { text }, auth: true });
 live.aiClear = () => request("/api/ai/chat", { method: "DELETE", auth: true });
 live.saveSkin = (body) => request("/api/skin", { method: "PUT", body, auth: true });
@@ -494,7 +530,7 @@ const api = DEMO_MODE ? demo : live;
 export const {
   checkUsernameAvailable, signUp, logIn, logOut,
   listMessages, updateMessage, deleteMessage, sendMessage, downloadAttachment,
-  getMe, getAnnouncement, checkLatest, getSkin, saveSkin, aiChat, aiSend, aiClear, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
+  getMe, getAnnouncement, checkLatest, getSkin, saveSkin, aiChat, aiSend, aiClear, receipts, receiptsScan, receiptsSettings, receiptsSendSummary, receiptUpdate, events, eventCreate, eventUpdate, eventDelete, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
   pushKey, pushSubscribe, pushUnsubscribe,
