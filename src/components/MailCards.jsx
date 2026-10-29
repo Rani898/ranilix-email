@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarPlus, Check, Loader2, MapPin, X } from "lucide-react";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
-import { CAT_STYLE, formatMoney, storeColor, parseIcs } from "../lib/money.js";
+import { CAT_STYLE, formatMoney, parseIcs } from "../lib/money.js";
+import StoreLogo from "./StoreLogo.jsx";
 import { downloadAttachment, eventCreate, sendMessage } from "../lib/api.js";
 
 export function SummaryCard({ data }) {
@@ -42,7 +43,7 @@ export function SummaryCard({ data }) {
         <ul className="mt-1">
           {(data.receipts || []).map((r, i) => (
             <li key={i} className="flex items-center gap-3 border-b border-slate-100 py-2.5">
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-sm font-extrabold text-white" style={{ background: storeColor(r.store) }}>{[...r.store][0]}</span>
+              <StoreLogo store={r.store} domain={r.domain} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-bold text-slate-900"><bdi>{r.store}</bdi></span>
                 <span className="block text-xs text-slate-500">{new Date(r.date).toLocaleDateString(locale, { day: "numeric", month: "short" })} · {r.source === "gmail" ? "Gmail" : "Ranilix"}</span>

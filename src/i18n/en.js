@@ -435,6 +435,7 @@ export default {
     openGmail: "Open in Gmail",
     hide: "Not a receipt",
     hiddenToast: "Hidden. It won't count in the summary.",
+    catAll: "Updated for all receipts from {store}, also future ones",
     monthly: "Monthly summary by email",
     monthlyHint: "On the 1st of every month you'll get a designed email with last month's spending and the receipts attached.",
     how: "Mail with a receipt, invoice or order confirmation is found automatically, also from your Gmail (its \"Purchases\" category and receipt emails from the last 180 days). You can change a category or hide something found by mistake.",

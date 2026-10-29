@@ -7,7 +7,8 @@ import { Button, Toggle } from "../components/ui.jsx";
 import { getSession } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { receipts as loadReceipts, receiptUpdate, receiptsScan, receiptsSendSummary, receiptsSettings } from "../lib/api.js";
-import { CATS, CAT_STYLE, formatMoney, monthKeyOf, monthTitle, shiftMonthKey, storeColor } from "../lib/money.js";
+import { CATS, CAT_STYLE, formatMoney, monthKeyOf, monthTitle, shiftMonthKey } from "../lib/money.js";
+import StoreLogo from "../components/StoreLogo.jsx";
 
 const SOURCE_DOT = { ranilix: "#2547ea", gmail: "#ea4335" };
 
@@ -80,6 +81,7 @@ export default function Receipts() {
     try {
       await receiptUpdate(r.id, patch);
       if (patch.hidden) { setPicked(null); setToast(t("receipts.hiddenToast")); }
+      if (patch.category) setToast(t("receipts.catAll", { store: r.store }));
       await load();
       if (!patch.hidden) setPicked((p) => (p ? { ...p, ...patch } : p));
     } catch (e) { setToast(errorText(e)); }
@@ -187,7 +189,7 @@ export default function Receipts() {
                             <tr key={r.id} className={`border-t border-slate-100 ${sel?.id === r.id ? "bg-brand-50" : "hover:bg-slate-50"}`}>
                               <td className="px-4 py-2.5">
                                 <button type="button" onClick={() => setPicked(r)} className="flex w-full items-center gap-3 text-start">
-                                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl font-extrabold text-white" style={{ background: storeColor(r.store) }}>{[...r.store][0]}</span>
+                                  <StoreLogo store={r.store} domain={r.domain} size={36} />
                                   <span className="min-w-0">
                                     <span className="block truncate font-bold text-slate-900"><bdi>{r.store}</bdi></span>
                                     <span className="block max-w-[16rem] truncate text-xs text-slate-500"><bdi>{r.what}</bdi></span>
@@ -210,7 +212,7 @@ export default function Receipts() {
                   {sel && (
                     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-surface shadow-lg">
                       <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-3">
-                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl font-extrabold text-white" style={{ background: storeColor(sel.store) }}>{[...sel.store][0]}</span>
+                        <StoreLogo store={sel.store} domain={sel.domain} size={36} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-extrabold text-slate-900"><bdi>{sel.store}</bdi></p>
                           <p className="text-xs text-slate-500">{new Date(sel.date).toLocaleString(locale, { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</p>

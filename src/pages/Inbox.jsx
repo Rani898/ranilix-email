@@ -420,6 +420,21 @@ function Inbox() {
             ))}
           </nav>
 
+          <div className="mt-1 space-y-1">
+          <Link to="/drive" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+            <HardDrive className="h-5 w-5" aria-hidden="true" />
+            <span className="flex-1 text-start">{t("drive.title")}</span>
+          </Link>
+          <Link to="/calendar" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+            <CalendarDays className="h-5 w-5" aria-hidden="true" />
+            <span className="flex-1 text-start">{t("calendar.title")}</span>
+          </Link>
+          <Link to="/receipts" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+            <ReceiptText className="h-5 w-5" aria-hidden="true" />
+            <span className="flex-1 text-start">{t("receipts.title")}</span>
+          </Link>
+          </div>
+
           <p className="mt-6 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">{t("gmail.connected")}</p>
           <button
             onClick={() => switchFolder("gmail")}
@@ -431,18 +446,6 @@ function Inbox() {
             <span className="grid h-5 w-5 place-items-center"><GoogleMark size={18} /></span>
             <span className="flex-1 text-start">{t("gmail.folder")}</span>
           </button>
-          <Link to="/drive" className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
-            <HardDrive className="h-5 w-5 text-brand-600" aria-hidden="true" />
-            <span className="flex-1 text-start">{t("drive.title")}</span>
-          </Link>
-          <Link to="/calendar" className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
-            <CalendarDays className="h-5 w-5 text-brand-600" aria-hidden="true" />
-            <span className="flex-1 text-start">{t("calendar.title")}</span>
-          </Link>
-          <Link to="/receipts" className="mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
-            <ReceiptText className="h-5 w-5 text-brand-600" aria-hidden="true" />
-            <span className="flex-1 text-start">{t("receipts.title")}</span>
-          </Link>
           {nextEvent && (
             <Link to="/calendar" className="mt-3 flex items-start gap-2.5 rounded-xl border border-slate-200 bg-surface p-3 hover:bg-slate-50">
               <span className="mt-1 h-8 w-1 shrink-0 rounded-full" style={{ background: EVENT_COLORS[nextEvent.color]?.bar }} />

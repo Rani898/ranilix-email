@@ -393,3 +393,16 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_user_time ON events (user_id, starts_at);
+
+-- The shop's web address for each receipt (for its logo and to group receipts by shop).
+CREATE TABLE IF NOT EXISTS receipt_domains (
+  receipt_id INTEGER PRIMARY KEY,
+  domain TEXT NOT NULL
+);
+-- A category the person chose for a shop: used for all its receipts, now and later.
+CREATE TABLE IF NOT EXISTS store_categories (
+  user_id INTEGER NOT NULL,
+  store_key TEXT NOT NULL,
+  category TEXT NOT NULL,
+  PRIMARY KEY (user_id, store_key)
+);
