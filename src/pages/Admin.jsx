@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   Palette,
+  ExternalLink,
   ImagePlus,
   ArrowLeft,
   Check,
@@ -396,7 +397,7 @@ function UserActionsMenu({ user, onPick }) {
     document.addEventListener("keydown", onKey);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
-    menu.current?.querySelector("button")?.focus();
+    menu.current?.querySelector("[role=menuitem]")?.focus({ preventScroll: true });
     return () => {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", onKey);
@@ -406,6 +407,12 @@ function UserActionsMenu({ user, onPick }) {
   }, [open]);
 
   const m = (k) => t(`admin.users.menu.${k}`);
+  const [copied, setCopied] = useState(false);
+  const copyMention = async () => {
+    try { await navigator.clipboard.writeText(`<@${user.discord.id}>`); } catch { /* shown anyway */ }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
   const items = [
     { kind: "linked", icon: Link2, title: m("linked"), desc: m("linkedDesc") },
     { kind: "accounts", icon: Mails, title: m("accounts"), desc: m("accountsDesc") },
@@ -440,6 +447,23 @@ function UserActionsMenu({ user, onPick }) {
           className="fixed z-50 max-h-[min(40rem,calc(100dvh-1rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-surface p-1.5 text-start shadow-xl animate-[supportIn_.12s_ease-out]"
           style={{ left: pos.left, top: pos.top, bottom: pos.bottom, width: pos.width }}>
           <p dir="ltr" className="truncate px-3 pb-1.5 pt-1 text-xs font-semibold text-slate-500 rtl:text-right">{user.email}</p>
+          {user.discord ? (
+            <div className="mx-1 mb-1.5 flex items-center gap-2.5 rounded-xl bg-[#5865F2]/10 px-2.5 py-2">
+              {user.discord.avatar
+                ? <img src={user.discord.avatar} alt="" className="h-8 w-8 shrink-0 rounded-full" />
+                : <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#5865F2] text-white"><DiscordMark className="h-4 w-4" /></span>}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-bold text-slate-900"><bdi>{user.discord.globalName || user.discord.username || m("discordUnknown")}</bdi></span>
+                <span dir="ltr" className="block truncate text-xs text-slate-600 rtl:text-right">{user.discord.username ? `@${user.discord.username}` : user.discord.id}</span>
+              </span>
+              <button type="button" onClick={copyMention} title={m("discordCopyHint")}
+                className="shrink-0 rounded-lg bg-[#5865F2] px-2.5 py-1.5 text-xs font-bold text-white hover:bg-[#4752c4]">{copied ? m("discordCopied") : m("discordCopy")}</button>
+              <a href={`https://discord.com/users/${user.discord.id}`} target="_blank" rel="noopener noreferrer" aria-label={m("discordOpen")} title={m("discordOpen")}
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[#5865F2] hover:bg-[#5865F2]/15"><ExternalLink className="h-4 w-4" /></a>
+            </div>
+          ) : (
+            <p className="mx-1 mb-1.5 flex items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2 text-xs text-slate-500"><DiscordMark className="h-4 w-4 text-slate-400" />{m("discordNone")}</p>
+          )}
           {items.map((it, i) => it.sep ? <div key={`sep${i}`} className="my-1.5 border-t border-slate-100" role="separator" /> : (
             <button key={it.kind} type="button" role="menuitem" onClick={() => { setPos(null); onPick(it.kind); }}
               className={`flex w-full items-start gap-3 rounded-xl px-3 py-2 text-start transition focus:outline-none ${it.danger ? "hover:bg-rose-50 focus:bg-rose-50" : "hover:bg-slate-50 focus:bg-slate-100"}`}>
@@ -458,6 +482,14 @@ function UserActionsMenu({ user, onPick }) {
         </div>
       )}
     </>
+  );
+}
+
+function DiscordMark({ className = "" }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M20.3 4.4A19.6 19.6 0 0 0 15.4 3l-.6 1.3a18 18 0 0 0-5.6 0L8.6 3a19.6 19.6 0 0 0-4.9 1.4C.6 9 0 13.6.3 18.1a19.8 19.8 0 0 0 6 3l1.3-2a12.8 12.8 0 0 1-2-1l.5-.4a14 14 0 0 0 11.8 0l.5.4c-.6.4-1.3.7-2 1l1.3 2a19.7 19.7 0 0 0 6-3c.4-5.2-.7-9.8-3.4-13.7ZM8.5 15.4c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4Zm7 0c-1.2 0-2.1-1.1-2.1-2.4s.9-2.4 2.1-2.4 2.2 1.1 2.1 2.4c0 1.3-.9 2.4-2.1 2.4Z" />
+    </svg>
   );
 }
 

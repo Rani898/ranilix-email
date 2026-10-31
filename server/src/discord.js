@@ -68,6 +68,46 @@ async function rest(env, method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
+/** Keep the person's Discord name (shown to admins next to their address). */
+async function rememberName(env, user) {
+  if (!user?.id) return;
+  try {
+    await env.DB.prepare("INSERT OR REPLACE INTO discord_names (discord_id, username, global_name, avatar, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(String(user.id), user.username || null, user.global_name || null, user.avatar || null, Date.now()).run();
+  } catch { /* not important */ }
+}
+
+/**
+ * Discord accounts linked to these Ranilix users: Map(userId -> { id, username, globalName, avatar }).
+ * Names we never saw are asked from Discord (a few at a time) and kept.
+ */
+export async function discordAccountsFor(env, userIds) {
+  const out = new Map();
+  if (!userIds.length) return out;
+  const marks = userIds.map(() => "?").join(",");
+  const { results } = await env.DB.prepare(`SELECT l.user_id, l.discord_id, n.username, n.global_name, n.avatar FROM discord_links l
+    LEFT JOIN discord_names n ON n.discord_id = l.discord_id
+    WHERE l.verified_at IS NOT NULL AND l.user_id IN (${marks}) ORDER BY l.verified_at DESC`).bind(...userIds).all();
+  let asked = 0;
+  for (const r of results) {
+    if (out.has(r.user_id)) continue;
+    let { username, global_name: globalName, avatar } = r;
+    if (!username && env.DISCORD_BOT_TOKEN && asked < 10) {
+      asked++;
+      try {
+        const u = await rest(env, "GET", `/users/${r.discord_id}`);
+        ({ username, global_name: globalName, avatar } = u);
+        await rememberName(env, u);
+      } catch { /* show the id only */ }
+    }
+    out.set(r.user_id, {
+      id: r.discord_id, username: username || "", globalName: globalName || "",
+      avatar: avatar ? `https://cdn.discordapp.com/avatars/${r.discord_id}/${avatar}.png?size=64` : null,
+    });
+  }
+  return out;
+}
+
 async function discordSettings(env) {
   const { results } = await env.DB.prepare("SELECT key, value FROM settings WHERE key LIKE 'discord_%'").all();
   return Object.fromEntries(results.map((r) => [r.key.slice(8), r.value]));
@@ -175,6 +215,7 @@ export async function discordInteraction(req, env, h) {
   if (i.type !== 2) return h.json({ type: 4, data: { content: "🤷", flags: EPHEMERAL } });
 
   const user = i.member?.user || i.user || {};
+  await rememberName(env, user);
   const name = i.data?.name;
   const options = i.data?.options || [];
   const sub = options[0]?.type === 1 ? ` ${options[0].name}` : "";
@@ -502,6 +543,7 @@ async function runSetup(env, i) {
 
 async function verifyButton(env, i, h) {
   const user = i.member?.user || {};
+  await rememberName(env, user);
   try {
     const roleId = (await discordSettings(env)).member_role;
     if (!roleId) return reply(h.json, "האימות עוד לא הוגדר. בקשו מהצוות להריץ /verify-panel.");

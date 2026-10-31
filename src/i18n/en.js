@@ -998,6 +998,12 @@ export default {
     },
     users: {
       menu: {
+        discordNone: "No Discord linked",
+        discordUnknown: "Discord user",
+        discordCopy: "Mention",
+        discordCopied: "Copied!",
+        discordCopyHint: "Copies the mention. Paste it in Discord to tag them",
+        discordOpen: "Open their Discord profile",
         label: "Actions",
         open: "Actions for {email}",
         on: "On",

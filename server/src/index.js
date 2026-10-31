@@ -15,7 +15,7 @@ import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
 import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
 import { calendarRoute } from "./calendar.js";
-import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister } from "./discord.js";
+import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister, discordAccountsFor } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
 /* Config & helpers                                                    */
@@ -451,10 +451,11 @@ async function adminRoute(req, env, admin, path, url, log) {
       for (const r of (await env.DB.prepare(`SELECT user_id FROM staff_roles WHERE user_id IN (${marks})`).bind(...ids).all()).results) staffSet.add(r.user_id);
       for (const r of (await env.DB.prepare(`SELECT user_id FROM temp_access WHERE user_id IN (${marks})`).bind(...ids).all()).results) tempSet.add(r.user_id);
     }
+    const discordOf = await discordAccountsFor(env, ids).catch(() => new Map());
     return json({
       total: total.n,
       users: results.map((u) => ({
-        staff: staffSet.has(u.id), tempAccess: tempSet.has(u.id),
+        staff: staffSet.has(u.id), tempAccess: tempSet.has(u.id), discord: discordOf.get(u.id) || null,
         drive: { used: driveUsed.get(u.id) || 0, quota: isAdmin(env, u.username) ? maxQ : Math.min(driveQuota.get(u.id) ?? defaultQuota, maxQ), custom: driveQuota.has(u.id) },
         id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),

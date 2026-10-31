@@ -406,3 +406,12 @@ CREATE TABLE IF NOT EXISTS store_categories (
   category TEXT NOT NULL,
   PRIMARY KEY (user_id, store_key)
 );
+
+-- Discord names of people who linked their address (for the admin panel: who is who).
+CREATE TABLE IF NOT EXISTS discord_names (
+  discord_id TEXT PRIMARY KEY,
+  username TEXT,
+  global_name TEXT,
+  avatar TEXT,
+  updated_at INTEGER NOT NULL
+);

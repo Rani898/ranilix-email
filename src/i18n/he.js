@@ -998,6 +998,12 @@ export default {
     },
     users: {
       menu: {
+        discordNone: "לא חיבר דיסקורד",
+        discordUnknown: "משתמש דיסקורד",
+        discordCopy: "תיוג",
+        discordCopied: "הועתק!",
+        discordCopyHint: "מעתיק את התיוג. מדביקים בדיסקורד והוא יתויג",
+        discordOpen: "פתיחת הפרופיל בדיסקורד",
         label: "פעולות",
         open: "פעולות עבור {email}",
         on: "פעיל",
