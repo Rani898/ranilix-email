@@ -804,6 +804,8 @@ export default {
   },
   errors: {
     drive_cap_kv: "קודם צריך לחבר את R2.",
+    site_limit: "הגעתם למספר המקסימלי של כתובות לאתרים ({max}). מחקו אחת קודם.",
+    site_not_found: "הכתובת הזאת לא נמצאה.",
     drive_cap_range: "בחרו בין 1 ל-{max} GB.",
     drive_link_gone: "הקישור הזה כבר לא עובד.",
     drive_off: "האחסון עוד לא מוגדר בשרת.",

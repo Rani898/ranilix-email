@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>Ranilix</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="top">
+    <img src="icons/32.png" alt="" width="26" height="26" />
+    <div class="brand">
+      <b>Ranilix</b>
+      <span id="me" class="muted"></span>
+    </div>
+    <button id="logout" class="icon-btn" title="התנתקות" hidden>
+      <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+    </button>
+  </header>
+
+  <!-- Login -->
+  <section id="login" hidden>
+    <h1>התחברות ל-Ranilix</h1>
+    <p class="muted">מתחברים פעם אחת, ואז בכל אתר לוחצים על התוסף ומקבלים אימייל וסיסמה.</p>
+    <form id="login-form">
+      <label>אימייל<input id="l-email" type="text" dir="ltr" autocomplete="username" placeholder="name@ranilix.com" required /></label>
+      <label>סיסמה<input id="l-pass" type="password" dir="ltr" autocomplete="current-password" required /></label>
+      <button class="primary" type="submit" id="l-btn">התחברות</button>
+      <p id="l-err" class="err" hidden></p>
+    </form>
+  </section>
+
+  <!-- Main -->
+  <section id="main" hidden>
+    <nav class="tabs">
+      <button data-tab="here" class="on">האתר הזה</button>
+      <button data-tab="all">כל האתרים שלי</button>
+    </nav>
+
+    <div id="tab-here">
+      <div class="site">
+        <img id="site-logo" alt="" width="28" height="28" />
+        <div>
+          <b id="site-host" dir="ltr"></b>
+          <span class="muted" id="site-note"></span>
+        </div>
+      </div>
+
+      <button class="primary big" id="make">
+        <svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.8L19 9.7l-4.1 3.3 1.3 5L12 15.3 7.8 18l1.3-5L5 9.7l5.1-1.9z"/></svg>
+        צור אימייל וסיסמה לאתר הזה
+      </button>
+      <p id="make-err" class="err" hidden></p>
+
+      <div id="creds" hidden>
+        <div class="field">
+          <span class="lbl">אימייל</span>
+          <code id="c-email" dir="ltr"></code>
+          <button class="copy" data-copy="c-email">העתק</button>
+        </div>
+        <div class="field">
+          <span class="lbl">סיסמה</span>
+          <code id="c-pass" dir="ltr" class="secret"></code>
+          <button class="icon-btn small" id="eye" title="הצג / הסתר">
+            <svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button class="copy" data-copy="c-pass">העתק</button>
+        </div>
+        <button class="secondary" id="fill">
+          <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          מלא בדף את האימייל והסיסמה
+        </button>
+        <p class="hint">הסיסמה נשמרת רק במחשב הזה, בתוך התוסף. מיילים שיגיעו לכתובת הזאת יופיעו בתיבה שלך ב-Ranilix.</p>
+
+        <div class="code-box">
+          <div class="row">
+            <b>קוד אימות מהאתר</b>
+            <button class="link-btn" id="check">בדוק מיילים</button>
+          </div>
+          <div id="code-out" class="muted">אחרי ההרשמה לחצו "בדוק מיילים" כדי לראות את הקוד שהאתר שלח.</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-all" hidden>
+      <input id="search" type="search" placeholder="חיפוש אתר…" />
+      <ul id="list"></ul>
+      <p id="list-empty" class="muted center" hidden>עוד לא יצרת כתובות לאתרים.</p>
+    </div>
+  </section>
+
+  <div id="toast" hidden></div>
+  <script src="popup.js"></script>
+</body>
+</html>

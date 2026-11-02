@@ -415,3 +415,16 @@ CREATE TABLE IF NOT EXISTS discord_names (
   avatar TEXT,
   updated_at INTEGER NOT NULL
 );
+
+-- One permanent address per website, made from the browser extension (e.g. netflix--k3x9qa).
+CREATE TABLE IF NOT EXISTS site_addresses (
+  local      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  site       TEXT NOT NULL,
+  host       TEXT,
+  created_at INTEGER NOT NULL,
+  received   INTEGER NOT NULL DEFAULT 0,
+  last_at    INTEGER,
+  off        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_site_user ON site_addresses(user_id, created_at);

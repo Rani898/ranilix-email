@@ -15,6 +15,7 @@ import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
 import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
 import { calendarRoute } from "./calendar.js";
+import { siteOwner, sitesRoute } from "./sites.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister, discordAccountsFor } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
@@ -348,6 +349,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM auto_reply_log WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM temp_addresses WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM temp_access WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM site_addresses WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM staff_roles WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM receipts WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM money_prefs WHERE user_id = ?").bind(userId),
@@ -859,6 +861,12 @@ async function route(req, env, log) {
     if (res) return res;
   }
 
+  /* ---- Site addresses (browser extension) ---- */
+  if (path.startsWith("/api/sites")) {
+    const res = await sitesRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
+    if (res) return res;
+  }
+
   /* ---- Temporary addresses ---- */
   if (path.startsWith("/api/temp")) {
     const res = await tempRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
@@ -1181,7 +1189,7 @@ export default {
     // Temporary addresses deliver to their owner until they expire.
     let isTemp = false;
     if (!user) {
-      const ownerId = await tempOwner(env, local);
+      const ownerId = (await tempOwner(env, local)) || (await siteOwner(env, local));
       if (ownerId) {
         user = await env.DB.prepare("SELECT id, username FROM users WHERE id = ?").bind(ownerId).first();
         isTemp = !!user;

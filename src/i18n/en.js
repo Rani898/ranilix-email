@@ -803,6 +803,8 @@ export default {
     fillBoth: "Please enter your email and password.",
   },
   errors: {
+    site_limit: "You have the most site addresses ({max}). Delete one first.",
+    site_not_found: "This address wasn't found.",
     drive_cap_kv: "Connect R2 first.",
     drive_cap_range: "Pick between 1 and {max} GB.",
     drive_link_gone: "This link doesn't work anymore.",
