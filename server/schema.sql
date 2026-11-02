@@ -428,3 +428,8 @@ CREATE TABLE IF NOT EXISTS site_addresses (
   off        INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_site_user ON site_addresses(user_id, created_at);
+-- When a site address stops working (no row = forever).
+CREATE TABLE IF NOT EXISTS site_expiry (
+  local      TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);

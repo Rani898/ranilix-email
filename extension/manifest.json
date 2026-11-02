@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ranilix – אימייל וסיסמה לכל אתר",
   "short_name": "Ranilix",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "לוחצים, ומקבלים כתובת Ranilix חדשה וסיסמה חזקה לאתר שאתם נרשמים אליו. מעתיקים או ממלאים בדף בלחיצה.",
   "action": {
     "default_popup": "popup.html",

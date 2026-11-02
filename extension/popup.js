@@ -21,7 +21,21 @@ const errText = (e) => ERRORS[e?.code] || e?.message || ERRORS.network;
 
 let state = { api: DEFAULT_API, token: "", me: "", saved: {} };
 let tab = null;      // { id, url, host, site }
-let current = null;  // { address, local, password, host }
+let current = null;  // { address, local, password, host, expiresAt }
+let life = 0;        // hours the next address lives (0 = forever)
+
+/** "לתמיד" / "פג תוקף" / "עוד 3 ימים" */
+function lifeText(expiresAt) {
+  if (!expiresAt) return { text: "לתמיד", gone: false };
+  const left = expiresAt - Date.now();
+  if (left <= 0) return { text: "פג תוקף (לא מקבלת מיילים)", gone: true };
+  const min = Math.ceil(left / 60000), h = Math.round(left / 3600000), d = Math.round(left / 86400000);
+  const t = min < 60 ? (min === 1 ? "עוד דקה" : `עוד ${min} דקות`)
+    : h < 24 ? (h === 1 ? "עוד שעה" : h === 2 ? "עוד שעתיים" : `עוד ${h} שעות`)
+    : d === 1 ? "עוד יום" : d === 2 ? "עוד יומיים" : `עוד ${d} ימים`;
+  return { text: t, gone: false };
+}
+const LIFE_OPTIONS = [["", "שנה תוקף…"], ["0", "לתמיד"], ["1", "שעה מעכשיו"], ["24", "יום מעכשיו"], ["168", "שבוע מעכשיו"], ["720", "חודש מעכשיו"]];
 
 /* ---------- helpers ---------- */
 async function api(path, opts = {}) {
@@ -109,7 +123,7 @@ async function showHere() {
     .sort((a, b) => b[1].createdAt - a[1].createdAt);
   if (mine.length) {
     const [local, v] = mine[0];
-    setCurrent({ local, address: v.address, password: v.password, host: v.host });
+    setCurrent({ local, address: v.address, password: v.password, host: v.host, expiresAt: v.expiresAt || null });
     $("site-note").textContent = mine.length > 1 ? `יש לך ${mine.length} כתובות לאתר הזה. מוצגת האחרונה.` : "כבר יצרת כתובת לאתר הזה.";
     $("make").lastChild.textContent = " צור אימייל וסיסמה חדשים";
   } else {
@@ -124,8 +138,24 @@ function setCurrent(c) {
   $("c-pass").textContent = c.password;
   $("c-pass").dataset.real = c.password;
   hidePass(true);
+  showLife();
   $("code-out").className = "muted";
   $("code-out").textContent = "אחרי ההרשמה לחצו \"בדוק מיילים\" כדי לראות את הקוד שהאתר שלח.";
+}
+
+function showLife() {
+  const l = lifeText(current?.expiresAt);
+  $("c-life").textContent = l.text;
+  $("c-life").classList.toggle("gone", l.gone);
+  $("c-life-set").value = "";
+}
+
+async function changeLife(local, hours) {
+  const r = await api(`/api/sites/${local}`, { method: "PATCH", body: { hours: Number(hours) } });
+  if (state.saved[local]) { state.saved[local].expiresAt = r.expiresAt; await store.set({ saved: state.saved }); }
+  if (current?.local === local) { current.expiresAt = r.expiresAt; showLife(); }
+  toast(r.expiresAt ? `התוקף עודכן: ${lifeText(r.expiresAt).text}` : "הכתובת תעבוד לתמיד");
+  return r;
 }
 
 function hidePass(hide) {
@@ -142,6 +172,7 @@ async function renderList() {
   const keep = new Set(server.map((s) => s.local));
   let changed = false;
   for (const k of Object.keys(state.saved)) if (!keep.has(k)) { delete state.saved[k]; changed = true; }
+  for (const s of server) if (state.saved[s.local] && state.saved[s.local].expiresAt !== s.expiresAt) { state.saved[s.local].expiresAt = s.expiresAt; changed = true; }
   if (changed) await store.set({ saved: state.saved });
 
   const items = server.filter((s) => !q || `${s.host} ${s.site} ${s.address}`.toLowerCase().includes(q));
@@ -153,11 +184,12 @@ async function renderList() {
     li.className = "item";
     li.innerHTML = `
       <div class="head"><img width="20" height="20" alt=""><b></b>${s.off ? '<span class="badge">חסומה</span>' : ""}<span class="muted"></span></div>
-      <div class="addr"></div>
+      <div class="head"><div class="addr"></div><span class="exp"></span></div>
       <div class="acts">
         <button class="chip" data-a="email">העתק אימייל</button>
         ${pw ? '<button class="chip" data-a="pass">העתק סיסמה</button>' : ""}
         <button class="chip" data-a="off">${s.off ? "הפעל מחדש" : "חסום מיילים"}</button>
+        <select data-a="life">${LIFE_OPTIONS.map(([v, t]) => `<option value="${v}">${t}</option>`).join("")}</select>
         <button class="chip warn" data-a="del">מחק</button>
       </div>`;
     const host = s.host || s.site;
@@ -165,6 +197,13 @@ async function renderList() {
     li.querySelector("b").textContent = baseHost(host);
     li.querySelector(".head .muted").textContent = s.received === 1 ? "מייל אחד" : s.received ? `${s.received} מיילים` : "";
     li.querySelector(".addr").textContent = s.address;
+    const lt = lifeText(s.expiresAt);
+    li.querySelector(".exp").textContent = s.expiresAt ? lt.text : "";
+    li.querySelector(".exp").classList.toggle("gone", lt.gone);
+    li.querySelector("select").addEventListener("change", async (ev) => {
+      if (ev.target.value === "") return;
+      try { await changeLife(s.local, ev.target.value); renderList(); } catch (e) { toast(errText(e)); }
+    });
     li.querySelector(".acts").addEventListener("click", async (ev) => {
       const b = ev.target.closest("button"); if (!b) return;
       const a = b.dataset.a;
@@ -237,11 +276,11 @@ $("make").addEventListener("click", async () => {
   if (!tab) return;
   $("make-err").hidden = true; $("make").disabled = true;
   try {
-    const r = await api("/api/sites", { method: "POST", body: { site: tab.site, host: baseHost(tab.host) } });
+    const r = await api("/api/sites", { method: "POST", body: { site: tab.site, host: baseHost(tab.host), hours: life } });
     const password = makePassword();
-    state.saved[r.local] = { address: r.address, password, host: baseHost(tab.host), createdAt: Date.now() };
+    state.saved[r.local] = { address: r.address, password, host: baseHost(tab.host), createdAt: Date.now(), expiresAt: r.expiresAt || null };
     await store.set({ saved: state.saved });
-    setCurrent({ local: r.local, address: r.address, password, host: baseHost(tab.host) });
+    setCurrent({ local: r.local, address: r.address, password, host: baseHost(tab.host), expiresAt: r.expiresAt || null });
     $("site-note").textContent = "מוכן! העתיקו או מלאו בדף.";
     $("make").lastChild.textContent = " צור אימייל וסיסמה חדשים";
   } catch (e) { $("make-err").textContent = errText(e); $("make-err").hidden = false; }
@@ -254,6 +293,19 @@ document.addEventListener("click", (e) => {
   const el = $(b.dataset.copy);
   copy(el.dataset.real || el.textContent, b);
 });
+function pickLife(h) {
+  life = Number(h) || 0;
+  document.querySelectorAll("#life button").forEach((b) => b.classList.toggle("on", Number(b.dataset.h) === life));
+}
+$("life").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  pickLife(b.dataset.h); store.set({ life });
+});
+$("c-life-set").addEventListener("change", async (e) => {
+  if (!current || e.target.value === "") return;
+  try { await changeLife(current.local, e.target.value); } catch (err) { toast(errText(err)); showLife(); }
+});
+
 $("eye").addEventListener("click", () => hidePass(!$("c-pass").classList.contains("hide")));
 
 $("fill").addEventListener("click", async () => {
@@ -306,7 +358,8 @@ $("search").addEventListener("input", () => { clearTimeout(searchTimer); searchT
 
 /* ---------- start ---------- */
 (async () => {
-  const s = await store.get(["api", "token", "me", "saved"]);
+  const s = await store.get(["api", "token", "me", "saved", "life"]);
   state = { api: s.api || DEFAULT_API, token: s.token || "", me: s.me || "", saved: s.saved || {} };
+  pickLife(s.life || 0);
   await show();
 })();

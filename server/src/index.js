@@ -15,7 +15,7 @@ import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
 import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
 import { calendarRoute } from "./calendar.js";
-import { siteOwner, sitesRoute } from "./sites.js";
+import { siteOwner, sitesCleanup, sitesRoute } from "./sites.js";
 import { createLogger, discordAdminStatus, discordInteraction, discordNotify, discordRegister, discordAccountsFor } from "./discord.js";
 
 /* ------------------------------------------------------------------ */
@@ -349,6 +349,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM auto_reply_log WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM temp_addresses WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM temp_access WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM site_expiry WHERE local IN (SELECT local FROM site_addresses WHERE user_id = ?)").bind(userId),
     env.DB.prepare("DELETE FROM site_addresses WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM staff_roles WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM receipts WHERE user_id = ?").bind(userId),
@@ -1263,6 +1264,7 @@ export default {
     await env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - DAY).run();
     await env.DB.prepare("DELETE FROM oauth_states WHERE created_at < ?").bind(now - DAY).run();
     await env.DB.prepare("DELETE FROM temp_addresses WHERE expires_at < ?").bind(now - 7 * DAY).run();
+    await sitesCleanup(env).catch(() => {});
     await env.DB.prepare("DELETE FROM auto_reply_log WHERE sent_at < ?").bind(now - 30 * DAY).run();
     await driveCleanup(env);
     await env.DB.prepare("DELETE FROM message_cards WHERE message_id NOT IN (SELECT id FROM messages)").run();
