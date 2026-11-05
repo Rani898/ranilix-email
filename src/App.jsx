@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing.jsx";
 import SignUp from "./pages/SignUp.jsx";
@@ -12,6 +12,7 @@ import SharedFile from "./pages/SharedFile.jsx";
 import Room from "./pages/Room.jsx";
 import Receipts from "./pages/Receipts.jsx";
 import Calendar from "./pages/Calendar.jsx";
+const DesignLab = lazy(() => import("./pages/DesignLab.jsx"));
 import { useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/room" element={<Room />} />
         <Route path="/receipts" element={<Receipts />} />
         <Route path="/calendar" element={<Calendar />} />
+        <Route path="/lab" element={<Suspense fallback={null}><DesignLab /></Suspense>} />
         <Route path="*" element={<Landing />} />
       </Routes>
       {!onboarding && !pathname.startsWith("/admin") && !pathname.startsWith("/room") && <SupportWidget />}
