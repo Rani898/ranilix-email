@@ -115,8 +115,8 @@ function RainLook() {
   };
   return (
     <div className="dark bg-zinc-950 text-zinc-50">
-      <RainGlassBackground title="כתובת משלכם. בשקט." className="min-h-[640px]" src={`${import.meta.env.BASE_URL}lab/rain-view.jpg`}>
-        <p className="max-w-md text-lg text-zinc-300">אימייל חינמי, פרטי ומהיר. נגבו את האדים מהזכוכית עם העכבר.</p>
+      <RainGlassBackground title="בחוץ גשם. בפנים, המיילים שלך." className="min-h-[680px]" rain={0.85} src={`${import.meta.env.BASE_URL}lab/rain-view.jpg`}>
+        <p className="max-w-md text-lg text-zinc-200 [text-shadow:0_1px_12px_rgba(0,0,0,.6)]">כתובת <bdi dir="ltr">@ranilix.com</bdi> משלכם, חינם ופרטית. נגבו את האדים מהחלון עם העכבר.</p>
         <Claim s={s} />
       </RainGlassBackground>
       <div className="mx-auto max-w-6xl space-y-10 px-6 py-16">

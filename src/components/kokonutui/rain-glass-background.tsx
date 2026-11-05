@@ -33,14 +33,14 @@ const DEFAULT_SRC =
 const WATER_SCALE = 0.75;
 const FOG_SCALE = 0.5;
 // The most drops on the pane at once.
-const MAX_DROPS = 140;
+const MAX_DROPS = 200;
 // A drop this big (css px) gets heavy enough to run.
 const RUN_AT = 7.5;
 // How long a wiped patch takes to fog over again, in seconds.
 const FOG_BACK = 9;
 const FOG_STEP = 0.25;
 // How much the fog hides the view, 0 to 1.
-const FOG = 0.6;
+const FOG = 0.3;
 const WIPE_WIDTH = 64;
 
 const VERTEX = `#version 300 es
