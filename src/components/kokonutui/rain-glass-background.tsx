@@ -40,7 +40,7 @@ const RUN_AT = 7.5;
 const FOG_BACK = 9;
 const FOG_STEP = 0.25;
 // How much the fog hides the view, 0 to 1.
-const FOG = 0.3;
+const FOG = 0.2;
 const WIPE_WIDTH = 64;
 
 const VERTEX = `#version 300 es
@@ -101,7 +101,7 @@ void main() {
   float clear = texture(uClear, uv).r;
 
   // Fogged glass: the view goes soft and pale. Wiped glass is clear.
-  vec3 soft = mix(scene(uv, 5.0), uFog, uFogAmount);
+  vec3 soft = mix(scene(uv, 3.2), uFog, uFogAmount);
   vec3 glass = mix(soft, scene(uv, 0.6), clear);
 
   // A drop is a tiny lens: it shows the view sharp and upside down.
