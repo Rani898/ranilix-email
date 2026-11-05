@@ -30,6 +30,12 @@ jobs:
           # Set in GitHub → Settings → Secrets and variables → Actions → Variables (API_URL)
           VITE_API_URL: ${{ vars.API_URL || 'https://api.ranilix.com' }}
       # SPA fallback so /signup and /login work on refresh
+      - name: Download the city photos for the design preview (Wikimedia Commons, free licenses)
+        run: |
+          mkdir -p dist/lab
+          UA="RanilixSite/1.0 (https://rani898.github.io/ranilix-email/)"
+          curl -fsSL -A "$UA" -o dist/lab/tlv.jpg "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PikiWiki_Israel_40946_Tel_Aviv_at_Night.JPG/1920px-PikiWiki_Israel_40946_Tel_Aviv_at_Night.JPG" || echo "::warning::Tel Aviv photo not downloaded"
+          curl -fsSL -A "$UA" -o dist/lab/nyc.jpg "https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/New_York_Midtown_Skyline_at_night_-_Jan_2006_edit1.jpg/1920px-New_York_Midtown_Skyline_at_night_-_Jan_2006_edit1.jpg" || echo "::warning::New York photo not downloaded"
       - run: cp dist/index.html dist/404.html && for r in privacy inbox login signup settings drive share room admin receipts calendar lab; do mkdir -p dist/$r && cp dist/index.html dist/$r/index.html; done
       - uses: actions/upload-pages-artifact@v3
         with:

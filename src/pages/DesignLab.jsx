@@ -113,19 +113,37 @@ function RainLook() {
     badge: "bg-indigo-400/20 text-indigo-200", chip: "bg-white/10", active: "bg-white/15", dot: "bg-indigo-300",
     card: "rounded-[24px] border border-white/15 bg-white/[.06] text-zinc-100 backdrop-blur-xl", iconBox: "rounded-2xl bg-gradient-to-br from-indigo-400 to-fuchsia-400 text-white",
   };
+  const [city, setCity] = useState("tlv");
+  const c = CITIES[city];
   return (
     <div className="dark bg-zinc-950 text-zinc-50">
-      <RainGlassBackground title="בחוץ גשם. בפנים, המיילים שלך." className="min-h-[680px]" rain={0.85} src={`${import.meta.env.BASE_URL}lab/rain-view.jpg`}>
-        <p className="max-w-md text-lg text-zinc-200 [text-shadow:0_1px_12px_rgba(0,0,0,.6)]">כתובת <bdi dir="ltr">@ranilix.com</bdi> משלכם, חינם ופרטית. נגבו את האדים מהחלון עם העכבר.</p>
+      <RainGlassBackground key={city} title="מיליון אורות בעיר. כתובת אחת שהיא שלך." className="min-h-[700px]" rain={0.85} src={`${import.meta.env.BASE_URL}lab/${c.file}`}>
+        <p className="max-w-lg text-lg text-zinc-100 [text-shadow:0_1px_12px_rgba(0,0,0,.7)]">אימייל חינמי ופרטי בכתובת <bdi dir="ltr">@ranilix.com</bdi>. מקבלים, שולחים ושומרים, בלי פרסומות ובלי לשלם.</p>
         <Claim s={s} />
+        <div className="flex items-center gap-1 rounded-full bg-black/40 p-1 text-sm backdrop-blur" role="group" aria-label="איזו עיר מאחורי החלון">
+          {Object.entries(CITIES).map(([id, x]) => (
+            <button key={id} type="button" onClick={() => setCity(id)} aria-pressed={city === id}
+              className={`rounded-full px-3 py-1 font-semibold ${city === id ? "bg-white text-zinc-900" : "text-white/80 hover:text-white"}`}>{x.name}</button>
+          ))}
+        </div>
+        <p className="text-xs text-white/60">גררו עם העכבר כדי לנגב את החלון</p>
       </RainGlassBackground>
       <div className="mx-auto max-w-6xl space-y-10 px-6 py-16">
         <MiniInbox s={s} />
         <Features s={s} />
+        <p className="text-center text-xs text-zinc-500">
+          צילום רקע: <a className="underline" href={c.page} target="_blank" rel="noreferrer">{c.credit}</a>, <a className="underline" href={c.licenseUrl} target="_blank" rel="noreferrer">{c.license}</a>
+        </p>
       </div>
     </div>
   );
 }
+
+// Night photos behind the rainy window. The deploy downloads them from Wikimedia Commons (free licenses, credited on the page).
+const CITIES = {
+  tlv: { name: "תל אביב", file: "tlv.jpg", credit: "shaula haitner, PikiWiki Israel", license: "CC BY 2.5", licenseUrl: "https://creativecommons.org/licenses/by/2.5/", page: "https://commons.wikimedia.org/wiki/File:PikiWiki_Israel_40946_Tel_Aviv_at_Night.JPG" },
+  nyc: { name: "ניו יורק", file: "nyc.jpg", credit: "Diliff", license: "CC BY-SA 3.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/3.0/", page: "https://commons.wikimedia.org/wiki/File:New_York_Midtown_Skyline_at_night_-_Jan_2006_edit1.jpg" },
+};
 
 function TopoLook() {
   const s = {
