@@ -6,7 +6,7 @@
 //         DISCORD_BOT_TOKEN (secret). The server/channels are linked with /setup in Discord.
 
 const API = "https://discord.com/api/v10";
-const SITE = "https://rani898.github.io/ranilix-email/";
+const SITE = "https://ranilix.com/";
 const COLOR = 0x2547ea;
 const EPHEMERAL = 64;
 const CODE_TTL = 10 * 60 * 1000;

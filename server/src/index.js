@@ -630,7 +630,7 @@ async function adminRoute(req, env, admin, path, url, log) {
       }
     }
     log("admin", test ? "🧪 עדכון בדיקה נשלח" : "📢 עדכון נשלח לכל המשתמשים", { "מנהל": admin.email, "נושא": subj, "נמענים": recipients.length });
-    if (!test) await discordNotify(env, "updates", { title: `📢 ${subj}`.slice(0, 256), description: text.slice(0, 3500), url: "https://rani898.github.io/ranilix-email/" });
+    if (!test) await discordNotify(env, "updates", { title: `📢 ${subj}`.slice(0, 256), description: text.slice(0, 3500), url: "https://ranilix.com/" });
     return json({ ok: true, recipients: recipients.length, test: !!test }, 201);
   }
 

@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /inbox
+Disallow: /settings
+Disallow: /admin
+Disallow: /drive
+Disallow: /room
+Disallow: /receipts
+Disallow: /calendar
+Disallow: /share
+Disallow: /lab
+
+Sitemap: https://ranilix.com/sitemap.xml

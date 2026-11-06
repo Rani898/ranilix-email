@@ -642,7 +642,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     // Let them know by email when they left one.
     if (status === "approved" && r.status !== "approved" && r.email && env.RESEND_API_KEY && item.share_token) {
       try {
-        const link = `https://rani898.github.io/ranilix-email/share?f=${item.share_token}`;
+        const link = `https://ranilix.com/share?f=${item.share_token}`;
         await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
