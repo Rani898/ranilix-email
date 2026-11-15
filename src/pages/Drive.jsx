@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, MoreVertical, Square, CheckSquare, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
-  Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Lock, Monitor, Inbox as InboxIcon, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
+  Ban, Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Lock, Monitor, Inbox as InboxIcon, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
 } from "lucide-react";
 import { BRAND, DEMO_MODE } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
@@ -13,7 +13,7 @@ import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
 import { useVideoThumb } from "../lib/videoThumbs.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareDecide, driveShareMode, driveShareRequests, driveShareUrl, driveShareVisits, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareBlock, driveShareBlocks, driveShareDecide, driveShareMode, driveShareRequests, driveShareUnblock, driveShareUrl, driveShareVisits, driveUpload,
 } from "../lib/api.js";
 
 function saveBlob(blob, filename) {
@@ -138,6 +138,8 @@ function ShareDialog({ item, onChange, onClose }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [blockRev, setBlockRev] = useState(0);
+  const bumpBlocks = () => setBlockRev((n) => n + 1);
   const link = it.shareToken ? driveShareUrl(it.shareToken) : "";
   const toggle = async (on) => {
     setBusy(true);
@@ -191,7 +193,8 @@ function ShareDialog({ item, onChange, onClose }) {
       )}
       {(it.viewOnly || it.requests > 0) && <ShareRequests id={it.id} onCount={(n) => { setIt((x) => ({ ...x, requests: n })); onChange({ ...it, requests: n }); }} />}
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
-      {(it.shareToken || it.downloads > 0) && <ShareVisits id={it.id} />}
+      {it.shareToken && <ShareBlocked id={it.id} rev={blockRev} onChange={bumpBlocks} />}
+      {(it.shareToken || it.downloads > 0) && <ShareVisits id={it.id} rev={blockRev} onBlocked={bumpBlocks} />}
     </Modal>
   );
 }
@@ -262,16 +265,27 @@ function ShareRequests({ id, onCount }) {
 }
 
 /** Who opened the link: when, on what kind of device, from roughly where. */
-function ShareVisits({ id }) {
+function ShareVisits({ id, rev = 0, onBlocked }) {
   const { t, locale } = useI18n();
+  const errorText = useErrorText();
   const [data, setData] = useState(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(null); // the visit awaiting a "block" confirmation
+  const [blocking, setBlocking] = useState(false);
+  const [error, setError] = useState("");
   const load = useCallback(() => {
     setBusy(true);
     driveShareVisits(id).then((d) => { setData(d); setFailed(false); }).catch(() => setFailed(true)).finally(() => setBusy(false));
   }, [id]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, rev]);
+  const doBlock = async () => {
+    if (!confirm) return;
+    setBlocking(true); setError("");
+    try { await driveShareBlock(id, confirm.ref, t("drive.visits.visitor", { n: confirm.visitor })); setConfirm(null); onBlocked?.(); load(); }
+    catch (e) { setError(errorText(e)); }
+    setBlocking(false);
+  };
   const region = useMemo(() => { try { return new Intl.DisplayNames([locale], { type: "region" }); } catch { return null; } }, [locale]);
   const place = (v) => [v.country && v.country !== "XX" && v.country !== "T1" ? (region?.of(v.country) || v.country) : "", v.city].filter(Boolean).join(", ");
   const when = (ts) => new Date(ts).toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -313,15 +327,79 @@ function ShareVisits({ id }) {
                           {place(v) && <> · {place(v)}</>}
                         </p>
                       </div>
-                      <time dateTime={new Date(v.at).toISOString()} className="shrink-0 text-xs tabular-nums text-slate-500">{when(v.at)}</time>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <time dateTime={new Date(v.at).toISOString()} className="text-xs tabular-nums text-slate-500">{when(v.at)}</time>
+                        {v.ref && (v.blocked
+                          ? <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700"><Ban className="h-3 w-3" aria-hidden="true" />{t("drive.visits.blockedChip")}</span>
+                          : <button type="button" onClick={() => setConfirm(v)} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Ban className="h-3 w-3" aria-hidden="true" />{t("drive.visits.block")}</button>)}
+                      </div>
                     </li>
                   );
                 })}
               </ul>
             )}
             <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{t("drive.visits.privacy")}</p>
+            {error && <p role="alert" className="mt-2 text-sm text-rose-600">{error}</p>}
           </>
         )}
+      {confirm && (
+        <Modal title={t("drive.visits.block")} tone="danger" onClose={() => setConfirm(null)}
+          footer={<>
+            <Button variant="ghost" onClick={() => setConfirm(null)}>{t("drive.cancel")}</Button>
+            <Button variant="danger" disabled={blocking} onClick={doBlock}><Ban className="h-4 w-4" />{t("drive.visits.block")}</Button>
+          </>}>
+          {t("drive.visits.blockConfirm", { who: t("drive.visits.visitor", { n: confirm.visitor }) })}
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+/** People the owner blocked, and any appeal they sent. Shows nothing until someone is blocked. */
+function ShareBlocked({ id, rev = 0, onChange }) {
+  const { t, locale } = useI18n();
+  const errorText = useErrorText();
+  const [list, setList] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    driveShareBlocks(id).then((d) => { setList(d.blocks); setFailed(false); }).catch(() => setFailed(true));
+  }, [id]);
+  useEffect(() => { load(); }, [load, rev]);
+  const unblock = async (b) => {
+    setBusyId(b.id); setError("");
+    try { await driveShareUnblock(id, b.id); onChange?.(); load(); } catch (e) { setError(errorText(e)); }
+    setBusyId(null);
+  };
+  const when = (ts) => new Date(ts).toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  if (!failed && (!list || list.length === 0)) return null;
+  return (
+    <section className="mt-5 border-t border-slate-200 pt-4" aria-label={t("drive.blocks.title")}>
+      <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900"><Ban className="h-4 w-4 text-rose-600" aria-hidden="true" /> {t("drive.blocks.title")}</h3>
+      {failed ? <p className="mt-2 text-sm text-rose-600">{t("drive.blocks.failed")}</p> : (
+        <ul className="mt-3 space-y-2">
+          {list.map((b) => (
+            <li key={b.id} className={`rounded-xl border px-3 py-2.5 ${b.status === "appealed" ? "border-amber-200 bg-amber-50/60" : "border-slate-200"}`}>
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-rose-50 text-rose-600"><Ban className="h-4 w-4" aria-hidden="true" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-900">
+                    <bdi>{b.label || t("drive.blocks.title")}</bdi>
+                    {b.status === "appealed" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">{t("drive.blocks.appealed")}</span>}
+                  </p>
+                  {b.appealName && <p className="text-xs text-slate-600"><bdi>{b.appealName}</bdi></p>}
+                  {b.appealNote && <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface px-2 py-1 text-xs text-slate-700"><bdi>{b.appealNote}</bdi></p>}
+                  <p className="mt-1 text-[11px] text-slate-500">{when(b.appealAt || b.at)}</p>
+                </div>
+                <Button variant="ghost" className="!px-3 !py-1.5 text-xs" disabled={busyId === b.id} onClick={() => unblock(b)}>{t("drive.blocks.unblock")}</Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && <p role="alert" className="mt-2 text-sm text-rose-600">{error}</p>}
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{t("drive.blocks.hint")}</p>
     </section>
   );
 }

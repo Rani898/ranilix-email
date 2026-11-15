@@ -317,6 +317,31 @@ CREATE TABLE IF NOT EXISTS drive_share_requests (
 CREATE INDEX IF NOT EXISTS idx_share_requests ON drive_share_requests (share_id, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_share_requests_key ON drive_share_requests (key_hash);
 
+-- People the owner blocked from a share link. `visitor` is the 12-char code from the visit log;
+-- `ip_hash` also catches the same network (so incognito or another browser there stays blocked).
+CREATE TABLE IF NOT EXISTS drive_share_blocks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  share_id    INTEGER NOT NULL,
+  visitor     TEXT NOT NULL,
+  ip_hash     TEXT,
+  label       TEXT,
+  status      TEXT NOT NULL DEFAULT 'blocked',  -- blocked | appealed
+  appeal_name TEXT,
+  appeal_note TEXT,
+  appeal_at   INTEGER,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_share_blocks ON drive_share_blocks (share_id, visitor);
+
+-- Maps a visitor code to their network, so a block can also cover the same network.
+CREATE TABLE IF NOT EXISTS drive_share_ids (
+  share_id INTEGER NOT NULL,
+  visitor  TEXT NOT NULL,
+  ip_hash  TEXT,
+  at       INTEGER NOT NULL,
+  PRIMARY KEY (share_id, visitor)
+);
+
 -- A personal look for the site (only for the person who picked it): colour set, nickname, background picture.
 CREATE TABLE IF NOT EXISTS user_skins (
   user_id INTEGER PRIMARY KEY,

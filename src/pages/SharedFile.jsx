@@ -1,14 +1,14 @@
 // Public download page for a file someone shared from their drive: /share?f=<token>.
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { CheckCircle2, ChevronLeft, Clock, Download, Eye, FileAudio, Folder, FolderOpen, Link2Off, Loader2, Lock, Play, RefreshCw, ShieldCheck, X, XCircle } from "lucide-react";
+import { Ban, CheckCircle2, ChevronLeft, Clock, Download, Eye, FileAudio, Folder, FolderOpen, Link2Off, Loader2, Lock, Play, RefreshCw, ShieldCheck, X, XCircle } from "lucide-react";
 import { BRAND } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
 import Preferences from "../components/Preferences.jsx";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
-import { sharedFileUrl, sharedInfo, sharedItemUrl, sharedList, sharedRequest } from "../lib/api.js";
+import { sharedAppeal, sharedFileUrl, sharedInfo, sharedItemUrl, sharedList, sharedRequest } from "../lib/api.js";
 import { Button, Modal } from "../components/ui.jsx";
 import { mmss, useVideoThumb } from "../lib/videoThumbs.js";
 
@@ -105,6 +105,60 @@ function RequestDialog({ token, onDone, onClose }) {
         {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
       </form>
     </Modal>
+  );
+}
+
+function BlockedCard({ token, info, onRecheck }) {
+  const { t } = useI18n();
+  const errorText = useErrorText();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(!!info.appealed);
+  const [error, setError] = useState("");
+  const field = "mt-1 w-full rounded-xl border border-slate-300 bg-surface px-3 py-2.5 text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100";
+  const send = async (e) => {
+    e.preventDefault();
+    setBusy(true); setError("");
+    try {
+      const r = await sharedAppeal(token, { name, note });
+      if (r.blocked === false) { onRecheck(); return; }
+      setSent(true); setOpen(false);
+    } catch (err) { setError(errorText(err)); }
+    setBusy(false);
+  };
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-surface p-8 text-center shadow-sm sm:p-10">
+      <span className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-rose-50 text-rose-600"><Ban className="h-8 w-8" aria-hidden="true" /></span>
+      <h1 className="mt-5 text-2xl font-extrabold text-slate-900">{t("shared.blocked.title")}</h1>
+      <p className="mx-auto mt-2 max-w-md text-slate-600">{t("shared.blocked.text")}</p>
+      {sent ? (
+        <div className="mx-auto mt-6 max-w-md space-y-3">
+          <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{t("shared.blocked.sent")}</p>
+          <Button variant="ghost" onClick={onRecheck}><RefreshCw className="h-4 w-4" />{t("shared.blocked.check")}</Button>
+        </div>
+      ) : open ? (
+        <form onSubmit={send} className="mx-auto mt-6 max-w-md space-y-3 text-start">
+          <label className="block text-sm font-semibold text-slate-700">{t("shared.req.name")}
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoFocus className={field} />
+          </label>
+          <label className="block text-sm font-semibold text-slate-700">{t("shared.blocked.note")}
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} rows={2} className={field} />
+          </label>
+          {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setOpen(false)}>{t("shared.close")}</Button>
+            <Button type="submit" disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{t("shared.blocked.send")}</Button>
+          </div>
+        </form>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)}
+          className="mx-auto mt-6 flex items-center justify-center gap-2 rounded-2xl border-2 border-brand-600 px-5 py-3 text-base font-bold text-brand-700 transition hover:bg-brand-50">
+          {t("shared.blocked.appeal")}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -365,6 +419,8 @@ export default function SharedFile() {
           <RetryBox text={error} onRetry={() => setAttempt((n) => n + 1)} />
         ) : !info ? (
           <div className="grid place-items-center py-24 text-slate-400"><Loader2 className="h-8 w-8 animate-spin" /></div>
+        ) : info.blocked ? (
+          <BlockedCard token={token} info={info} onRecheck={() => setAttempt((n) => n + 1)} />
         ) : info.folder ? (
           <SharedFolder token={token} info={info} dl={dl} />
         ) : (

@@ -253,6 +253,18 @@ export function deviceOf(ua = "") {
   return { device, os, browser };
 }
 
+const shareIp = (req) => req.headers.get("CF-Connecting-IP") || "local";
+
+/** Stable, non-reversible ids for a visitor on one share: the 12-char code shown in the log, and a network id. */
+async function visitorIds(req, h, shareId) {
+  const ip = shareIp(req);
+  const ua = req.headers.get("User-Agent") || "";
+  return {
+    visitor: (await h.sha256(`${shareId}|${ip}|${ua}`)).slice(0, 12),
+    ipHash: (await h.sha256(`ip|${shareId}|${ip}`)).slice(0, 16),
+  };
+}
+
 async function logVisit(env, req, h, shareId, item, kind) {
   try {
     const ip = req.headers.get("CF-Connecting-IP") || "local";
@@ -260,6 +272,9 @@ async function logVisit(env, req, h, shareId, item, kind) {
     // The same person gets the same short code, without keeping their address.
     const visitor = (await h.sha256(`${shareId}|${ip}|${ua}`)).slice(0, 12);
     const now = Date.now();
+    // Remember who this visitor is on this share, so the owner can block them (and the same network) later.
+    await env.DB.prepare("INSERT INTO drive_share_ids (share_id, visitor, ip_hash, at) VALUES (?, ?, ?, ?) ON CONFLICT(share_id, visitor) DO UPDATE SET ip_hash = excluded.ip_hash, at = excluded.at")
+      .bind(shareId, visitor, (await h.sha256(`ip|${shareId}|${ip}`)).slice(0, 16), now).run();
     const quiet = { open: 10, view: 30, download: 2 }[kind] * 60 * 1000;
     const seen = await env.DB.prepare("SELECT 1 FROM drive_share_visits WHERE share_id = ? AND visitor = ? AND kind = ? AND item_id IS ? AND at > ? LIMIT 1")
       .bind(shareId, visitor, kind, item?.id ?? null, now - quiet).first();
@@ -284,6 +299,20 @@ async function accessOf(env, h, shareId, key) {
     const r = await env.DB.prepare("SELECT status FROM drive_share_requests WHERE share_id = ? AND key_hash = ?").bind(shareId, keyHash).first();
     return r ? r.status : "none";
   });
+}
+
+/** The block covering this visitor on a share, or null. Short cache, so a new block takes effect within seconds. */
+async function blockOf(env, shareId, ids) {
+  return cached(`bk:${shareId}:${ids.visitor}:${ids.ipHash}`, 4000, () =>
+    env.DB.prepare("SELECT id, status FROM drive_share_blocks WHERE share_id = ? AND (visitor = ? OR (ip_hash IS NOT NULL AND ip_hash = ?)) LIMIT 1")
+      .bind(shareId, ids.visitor, ids.ipHash).first());
+}
+
+/** Stop a blocked visitor from reaching the files of a share. */
+async function ensureAllowed(req, env, h, shareId) {
+  if (await blockOf(env, shareId, await visitorIds(req, h, shareId))) {
+    throw new h.HttpError(403, "The owner has blocked this link for you.", "drive_blocked");
+  }
 }
 
 // Things a browser can show in the page; anything else can only be downloaded.
@@ -318,6 +347,7 @@ export async function driveShareRoute(req, env, path, h) {
   if (fm && req.method === "GET") {
     const root = await cached(`r:${fm[1]}`, 15000, () => env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ? AND is_folder = 1").bind(fm[1]).first());
     if (!root) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
+    await ensureAllowed(req, env, h, root.id);
     const url = new URL(req.url);
     if (fm[2] === "list") {
       const sub = url.searchParams.get("sub");
@@ -383,6 +413,37 @@ export async function driveShareRoute(req, env, path, h) {
     return h.json({ key, status: "pending" }, 201);
   }
 
+  // A blocked visitor asks the owner to be let back in.
+  const ap = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})\/appeal$/);
+  if (ap && req.method === "POST") {
+    const share = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ?").bind(ap[1]).first();
+    if (!share) throw new h.HttpError(404, "This link doesn't work anymore.", "drive_link_gone");
+    const block = await blockOf(env, share.id, await visitorIds(req, h, share.id));
+    if (!block) return h.json({ ok: true, blocked: false });
+    let body = {};
+    try { body = await req.json(); } catch { /* empty */ }
+    const name = String(body.name || "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, 60);
+    const note = String(body.note || "").replace(/[\u0000-\u0008\u000b-\u001f]/g, " ").trim().slice(0, 300);
+    await h.rateLimit(env, `shareappeal:${shareIp(req)}`, 6, 3600 * 1000);
+    const now = Date.now();
+    const firstAppeal = block.status !== "appealed";
+    await env.DB.prepare("UPDATE drive_share_blocks SET status = 'appealed', appeal_name = ?, appeal_note = ?, appeal_at = ? WHERE id = ?")
+      .bind(name || null, note || null, now, block.id).run();
+    try {
+      if (firstAppeal && h.insertMessage) {
+        const owner = await env.DB.prepare("SELECT username FROM users WHERE id = ?").bind(share.user_id).first();
+        await h.insertMessage(env, share.user_id, {
+          folder: "inbox", fromName: "Ranilix Drive", fromAddr: `drive@${env.MAIL_DOMAIN}`, to: owner ? `${owner.username}@${env.MAIL_DOMAIN}` : "",
+          subject: `בקשת ערעור על חסימה: ${share.name}`,
+          body: `${name || "מישהו"} שחסמת מהקישור "${share.name}" מבקש/ת לבטל את החסימה.${note ? `\n\nהודעה: ${note}` : ""}\n\nכדי לבטל או להשאיר את החסימה: הדרייב שלך ← "${share.name}" ← שיתוף בקישור ← חסומים.\n\nSomeone you blocked from "${share.name}" asked to be unblocked.`,
+          date: now,
+        });
+        await h.notifyUser?.(env, share.user_id);
+      }
+    } catch (e) { console.error("share appeal note", e); /* saved anyway */ }
+    return h.json({ ok: true, appealed: true });
+  }
+
   const m = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})(\/info)?$/);
   if (!m || req.method !== "GET") return null;
   const row = await env.DB.prepare("SELECT * FROM drive_files WHERE share_token = ?").bind(m[1]).first();
@@ -390,6 +451,8 @@ export async function driveShareRoute(req, env, path, h) {
   // The download page asks for the name, size and type first (nothing private: no owner, no folder).
   if (m[2]) {
     const key = new URL(req.url).searchParams.get("k");
+    const block = await blockOf(env, row.id, await visitorIds(req, h, row.id));
+    if (block) return h.json({ blocked: true, appealed: block.status === "appealed", folder: !!row.is_folder, name: row.name });
     if (!key) await logVisit(env, req, h, row.id, null, "open"); // checking on a request isn't a new visit
     const viewOnly = await isViewOnly(env, row.id);
     const access = viewOnly ? await accessOf(env, h, row.id, key) : "approved";
@@ -408,6 +471,7 @@ export async function driveShareRoute(req, env, path, h) {
  * small pieces and is never limited; ?thumb=1 is the little picture in the gallery (not counted as a visit).
  */
 async function serveShared(req, env, h, url, share, row) {
+  await ensureAllowed(req, env, h, share.id);
   const view = url.searchParams.get("view") === "1";
   const thumb = url.searchParams.get("thumb") === "1";
   if (await isViewOnly(env, share.id)) {
@@ -598,7 +662,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ links });
   }
 
-  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/share-mode|\/link|\/visits|\/requests(?:\/\d+)?)?$/);
+  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/share-mode|\/link|\/visits|\/requests(?:\/\d+)?|\/block|\/blocks(?:\/\d+)?)?$/);
   if (!m) return null;
   const item = await ownItem(env, user.id, m[1]);
   if (!item) throw new HttpError(404, "Not found.", "drive_not_found");
@@ -657,7 +721,34 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ ok: true, status });
   }
 
+  // People the owner blocked from this link, with any appeal they sent.
+  if (m[2] === "/blocks" && req.method === "GET") {
+    const { results } = await env.DB.prepare("SELECT id, label, status, appeal_name, appeal_note, appeal_at, created_at FROM drive_share_blocks WHERE share_id = ? ORDER BY (status = 'appealed') DESC, created_at DESC LIMIT 200").bind(item.id).all();
+    return json({ blocks: results.map((r) => ({ id: String(r.id), label: r.label || "", status: r.status, appealName: r.appeal_name || "", appealNote: r.appeal_note || "", appealAt: r.appeal_at, at: r.created_at })) });
+  }
+
+  if (m[2] === "/block" && req.method === "POST") {
+    const { visitor, label } = await readJson(req);
+    const code = String(visitor || "").toLowerCase();
+    if (!/^[a-f0-9]{12}$/.test(code)) throw new HttpError(400, "Pick someone from the visitor list to block.", "drive_bad_visitor");
+    const seen = await env.DB.prepare("SELECT ip_hash FROM drive_share_ids WHERE share_id = ? AND visitor = ?").bind(item.id, code).first();
+    const exists = await env.DB.prepare("SELECT id FROM drive_share_blocks WHERE share_id = ? AND visitor = ?").bind(item.id, code).first();
+    if (!exists) {
+      await env.DB.prepare("INSERT INTO drive_share_blocks (share_id, visitor, ip_hash, label, status, created_at) VALUES (?, ?, ?, ?, 'blocked', ?)")
+        .bind(item.id, code, seen?.ip_hash || null, String(label || "").slice(0, 40) || null, Date.now()).run();
+      log("accounts", "\u26d4 \u05d7\u05e1\u05d9\u05de\u05ea \u05de\u05d1\u05e7\u05e8 \u05de\u05e7\u05d9\u05e9\u05d5\u05e8 \u05d3\u05e8\u05d9\u05d9\u05d1", { "\u05de\u05e9\u05ea\u05de\u05e9": user.email });
+    }
+    return json({ ok: true });
+  }
+
+  const bm = m[2] && /^\/blocks\/(\d+)$/.exec(m[2]);
+  if (bm && req.method === "DELETE") {
+    await env.DB.prepare("DELETE FROM drive_share_blocks WHERE id = ? AND share_id = ?").bind(Number(bm[1]), item.id).run();
+    return json({ ok: true });
+  }
+
   if (m[2] === "/visits" && req.method === "GET") {
+    const blockedSet = new Set((await env.DB.prepare("SELECT visitor FROM drive_share_blocks WHERE share_id = ?").bind(item.id).all()).results.map((r) => r.visitor));
     const { results } = await env.DB.prepare("SELECT item_name, kind, visitor, device, os, browser, country, city, at FROM drive_share_visits WHERE share_id = ? ORDER BY at DESC LIMIT 300").bind(item.id).all();
     const sum = await env.DB.prepare("SELECT COUNT(*) AS total, COUNT(DISTINCT visitor) AS people, SUM(kind = 'open') AS opens, SUM(kind = 'download') AS downloads, SUM(kind = 'view') AS views FROM drive_share_visits WHERE share_id = ?").bind(item.id).first();
     // Number the visitors in the order they first came (visitor 1, 2, 3 ...).
@@ -665,7 +756,7 @@ export async function driveRoute(req, env, path, url, user, h) {
     [...results].reverse().forEach((r) => { if (!order.has(r.visitor)) order.set(r.visitor, order.size + 1); });
     return json({
       summary: { people: sum.people || 0, opens: sum.opens || 0, downloads: sum.downloads || 0, views: sum.views || 0 },
-      visits: results.map((r) => ({ at: r.at, kind: r.kind, item: r.item_name, visitor: order.get(r.visitor), device: r.device, os: r.os, browser: r.browser, country: r.country, city: r.city })),
+      visits: results.map((r) => ({ at: r.at, kind: r.kind, item: r.item_name, visitor: order.get(r.visitor), ref: r.visitor, blocked: blockedSet.has(r.visitor), device: r.device, os: r.os, browser: r.browser, country: r.country, city: r.city })),
     });
   }
 
@@ -723,6 +814,8 @@ export async function driveCleanup(env) {
   await env.DB.prepare("DELETE FROM drive_share_visits WHERE at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 90 * 24 * 3600 * 1000).run();
   await env.DB.prepare("DELETE FROM drive_share_requests WHERE created_at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 180 * 24 * 3600 * 1000).run();
   await env.DB.prepare("DELETE FROM drive_share_opts WHERE file_id NOT IN (SELECT id FROM drive_files)").run();
+  await env.DB.prepare("DELETE FROM drive_share_blocks WHERE share_id NOT IN (SELECT id FROM drive_files)").run();
+  await env.DB.prepare("DELETE FROM drive_share_ids WHERE at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 180 * 24 * 3600 * 1000).run();
   if (!env.DRIVE) return;
   const { results } = await env.DB.prepare("SELECT * FROM drive_uploads WHERE created_at < ?").bind(Date.now() - 24 * 3600 * 1000).all();
   for (const r of results) {

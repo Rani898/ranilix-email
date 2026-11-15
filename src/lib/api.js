@@ -367,6 +367,10 @@ live.driveShareDecide = (id, rid, status) => request(`/api/drive/${encodeURIComp
 const qs = (o) => { const q = Object.entries(o).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v === true ? 1 : v)}`).join("&"); return q ? `?${q}` : ""; };
 live.sharedFileUrl = (token, view = false, k = "") => `${API_URL}/api/drive/s/${encodeURIComponent(token)}${qs({ view, k })}`;
 live.driveShareVisits = (id) => request(`/api/drive/${encodeURIComponent(id)}/visits`, { auth: true });
+live.driveShareBlocks = (id) => request(`/api/drive/${encodeURIComponent(id)}/blocks`, { auth: true });
+live.driveShareBlock = (id, visitor, label) => request(`/api/drive/${encodeURIComponent(id)}/block`, { method: "POST", body: { visitor, label }, auth: true });
+live.driveShareUnblock = (id, blockId) => request(`/api/drive/${encodeURIComponent(id)}/blocks/${encodeURIComponent(blockId)}`, { method: "DELETE", auth: true });
+live.sharedAppeal = (token, body) => request(`/api/drive/s/${encodeURIComponent(token)}/appeal`, { method: "POST", body });
 live.sharedList = (token, sub) => request(`/api/drive/s/${encodeURIComponent(token)}/list${sub ? `?sub=${encodeURIComponent(sub)}` : ""}`);
 live.sharedItemUrl = (token, id, view = false, thumb = false, k = "") => `${API_URL}/api/drive/s/${encodeURIComponent(token)}/file/${encodeURIComponent(id)}${qs({ view, thumb: view && thumb, k })}`;
 live.sharedFetch = async (token) => (await request(`/api/drive/s/${encodeURIComponent(token)}?view=1`, { raw: true })).blob();
@@ -514,6 +518,10 @@ demo.driveShareRequests = async () => ({ requests: [] });
 demo.driveShareDecide = async (id, rid, status) => ({ ok: true, status });
 demo.sharedRequest = async () => ({ key: "0".repeat(32), status: "pending" });
 demo.driveShareVisits = async () => ({ summary: { people: 0, opens: 0, views: 0, downloads: 0 }, visits: [] });
+demo.driveShareBlocks = async () => ({ blocks: [] });
+demo.driveShareBlock = async () => ({ ok: true });
+demo.driveShareUnblock = async () => ({ ok: true });
+demo.sharedAppeal = async () => ({ ok: true, appealed: true });
 demo.sharedList = async (token, sub) => {
   const root = demoShared(token); const d = demoDrive();
   const byId = (id) => d.items.find((i) => i.id === id);
@@ -537,5 +545,5 @@ export const {
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
-  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits, sharedRequest, driveShareMode, driveShareRequests, driveShareDecide,
+  driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits, driveShareBlocks, driveShareBlock, driveShareUnblock, sharedRequest, sharedAppeal, driveShareMode, driveShareRequests, driveShareDecide,
 } = api;
