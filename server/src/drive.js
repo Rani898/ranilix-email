@@ -761,11 +761,15 @@ export async function driveRoute(req, env, path, url, user, h) {
   }
 
   if (m[2] === "/share" && req.method === "POST") {
-    const { on } = await readJson(req);
-    const token = on ? h.randomHex(16) : null;
+    const { on, reset } = await readJson(req);
+    // reset = keep sharing on, but make a fresh link so the old one stops working.
+    const turnOn = on || reset;
+    const token = turnOn ? h.randomHex(16) : null;
     await env.DB.prepare("UPDATE drive_files SET share_token = ? WHERE id = ?").bind(token, item.id).run();
-    if (!on) await env.DB.prepare("DELETE FROM drive_share_stats WHERE file_id = ?").bind(item.id).run();
-    if (on) log("accounts", "🔗 קובץ מהדרייב שותף בקישור", { "משתמש": user.email });
+    if (item.share_token) shareCache.delete(`r:${item.share_token}`); // the old link resolves no more
+    if (!turnOn) await env.DB.prepare("DELETE FROM drive_share_stats WHERE file_id = ?").bind(item.id).run();
+    if (reset) log("accounts", "🔁 קובץ מהדרייב קיבל קישור חדש", { "משתמש": user.email });
+    else if (on) log("accounts", "🔗 קובץ מהדרייב שותף בקישור", { "משתמש": user.email });
     const opts = await env.DB.prepare("SELECT view_only FROM drive_share_opts WHERE file_id = ?").bind(item.id).first();
     return json(clientItem({ ...item, share_token: token, view_only: opts?.view_only || 0 }));
   }

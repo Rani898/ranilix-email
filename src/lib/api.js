@@ -354,6 +354,7 @@ live.driveRename = (id, name) => request(`/api/drive/${id}`, { method: "PATCH", 
 live.driveMove = (id, parent) => request(`/api/drive/${id}`, { method: "PATCH", body: { parent }, auth: true });
 live.driveDelete = (id) => request(`/api/drive/${id}`, { method: "DELETE", auth: true });
 live.driveShare = (id, on) => request(`/api/drive/${id}/share`, { method: "POST", body: { on }, auth: true });
+live.driveShareReset = (id) => request(`/api/drive/${id}/share`, { method: "POST", body: { reset: true }, auth: true });
 live.driveSaveAttachment = (attachmentId, parent = null) => request("/api/drive/from-attachment", { method: "POST", body: { attachmentId, parent }, auth: true });
 live.driveDownload = async (id, view = false) => (await request(`/api/drive/${id}/download${view ? "?view=1" : ""}`, { auth: true, raw: true })).blob();
 // The link people get opens a download page on the site (/share?f=…), which then fetches the file from the server.
@@ -501,6 +502,7 @@ demo.driveDelete = async (id) => {
   return { ok: true, ...demoUsage(d) };
 };
 demo.driveShare = async (id, on) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); it.shared = !!on; it.shareToken = on ? Math.random().toString(16).slice(2).padEnd(32, "0") : null; demoDriveSave(d); return demoPub(it); };
+demo.driveShareReset = async (id) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); it.shareToken = Math.random().toString(16).slice(2).padEnd(32, "0"); demoDriveSave(d); return demoPub(it); };
 demo.driveSaveAttachment = async () => { throw new ApiError("", "drive_demo"); };
 demo.driveLinks = async (ids) => Object.fromEntries(demoDrive().items.filter((i) => ids.includes(i.id) && i.data).map((i) => [i.id, i.data]));
 demo.driveLink = async (id) => { const it = demoDrive().items.find((i) => i.id === id); return it?.data || "#"; };
@@ -544,6 +546,6 @@ export const {
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
-  driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveSaveAttachment,
+  driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveShareReset, driveSaveAttachment,
   driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits, driveShareBlocks, driveShareBlock, driveShareUnblock, sharedRequest, sharedAppeal, driveShareMode, driveShareRequests, driveShareDecide,
 } = api;

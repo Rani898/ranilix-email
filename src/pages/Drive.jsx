@@ -13,7 +13,7 @@ import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
 import { useVideoThumb } from "../lib/videoThumbs.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareBlock, driveShareBlocks, driveShareDecide, driveShareMode, driveShareRequests, driveShareUnblock, driveShareUrl, driveShareVisits, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareBlock, driveShareBlocks, driveShareReset, driveShareDecide, driveShareMode, driveShareRequests, driveShareUnblock, driveShareUrl, driveShareVisits, driveUpload,
 } from "../lib/api.js";
 
 function saveBlob(blob, filename) {
@@ -139,8 +139,14 @@ function ShareDialog({ item, onChange, onClose }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [blockRev, setBlockRev] = useState(0);
+  const [confirmReset, setConfirmReset] = useState(false);
   const bumpBlocks = () => setBlockRev((n) => n + 1);
   const link = it.shareToken ? driveShareUrl(it.shareToken) : "";
+  const reset = async () => {
+    setBusy(true);
+    try { const next = await driveShareReset(it.id); setIt(next); onChange(next); setError(""); setConfirmReset(false); } catch (e) { setError(errorText(e)); }
+    setBusy(false);
+  };
   const toggle = async (on) => {
     setBusy(true);
     try { const next = await driveShare(it.id, on); setIt(next); onChange(next); setError(""); } catch (e) { setError(errorText(e)); }
@@ -188,6 +194,10 @@ function ShareDialog({ item, onChange, onClose }) {
             <span className="inline-flex items-center gap-1.5 text-slate-600"><Download className="h-4 w-4" aria-hidden="true" /> {t("drive.downloads", { n: it.downloads || 0 })}</span>
             <a href={link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">{t(it.folder ? "drive.openFolderPage" : "drive.openPage")} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
           </div>
+          <button type="button" onClick={() => setConfirmReset(true)} disabled={busy}
+            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-rose-600 disabled:opacity-50">
+            <RefreshCw className="h-4 w-4" aria-hidden="true" /> {t("drive.relink")}
+          </button>
           <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">{t(it.folder ? "drive.shareWhoFolder" : "drive.shareWho")}</p>
         </>
       )}
@@ -195,6 +205,15 @@ function ShareDialog({ item, onChange, onClose }) {
       {error && <p role="alert" className="mt-3 text-sm text-rose-600">{error}</p>}
       {it.shareToken && <ShareBlocked id={it.id} rev={blockRev} onChange={bumpBlocks} />}
       {(it.shareToken || it.downloads > 0) && <ShareVisits id={it.id} rev={blockRev} onBlocked={bumpBlocks} />}
+      {confirmReset && (
+        <Modal title={t("drive.relink")} tone="danger" onClose={() => setConfirmReset(false)}
+          footer={<>
+            <Button variant="ghost" onClick={() => setConfirmReset(false)}>{t("drive.cancel")}</Button>
+            <Button variant="danger" disabled={busy} onClick={reset}><RefreshCw className="h-4 w-4" />{t("drive.relinkDo")}</Button>
+          </>}>
+          {t("drive.relinkConfirm")}
+        </Modal>
+      )}
     </Modal>
   );
 }
