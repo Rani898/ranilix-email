@@ -37,5 +37,9 @@ id = "REPLACE_WITH_YOUR_KV_ID"
 binding = "DRIVE"
 bucket_name = "ranilix-drive"
 
+# Workers AI: powers Mochi's room and the AI support desk. No key or token — free daily allowance.
+[ai]
+binding = "AI"
+
 [triggers]
 crons = ["0 3 * * *"]

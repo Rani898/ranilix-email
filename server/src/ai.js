@@ -1,27 +1,24 @@
-// The private room: a chat with Mochi, a friendly AI (Google Gemini), for the admin who turned it on.
-// Needs the GEMINI_API_KEY secret (free key from Google AI Studio).
+// The private room: a chat with Mochi, a friendly AI, for the admin who turned it on.
+// Also powers the support desk. Runs on Cloudflare Workers AI through the `AI` binding
+// (wrangler.toml → [ai]) — no API key, no token, no quota juggling. Free daily allowance.
 
-const API = "https://generativelanguage.googleapis.com/v1beta";
 const HISTORY = 30; // messages sent along so Mochi remembers the conversation
 const MAX_TEXT = 4000;
 
-// A key that hit its quota (429) rests for a while; calls automatically use the next key.
-const keyCooldown = new Map(); // key -> until (ms)
-const KEY_REST = 10 * 60 * 1000;
+// Models tried in order. Override the first with the AI_MODEL var in wrangler.toml.
+// Llama 3.3 70B handles Hebrew well; the smaller ones are the fallback if it's busy.
+const MODELS = [
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/meta/llama-3.1-8b-instruct",
+  "@cf/qwen/qwen1.5-14b-chat-awq",
+];
+function models(env) {
+  const list = env.AI_MODEL ? [env.AI_MODEL, ...MODELS] : [...MODELS];
+  return [...new Set(list)];
+}
 
-/** All Gemini keys: GEMINI_API_KEY (one, or several comma-separated) plus GEMINI_API_KEY2..4. */
-export function apiKeys(env) {
-  const raw = [env.GEMINI_API_KEY, env.GEMINI_API_KEY2, env.GEMINI_API_KEY3, env.GEMINI_API_KEY4]
-    .flatMap((k) => String(k || "").split(",")).map((k) => k.trim()).filter(Boolean);
-  return [...new Set(raw)];
-}
-export const aiAvailable = (env) => apiKeys(env).length > 0;
-function liveKeys(env) {
-  const now = Date.now();
-  const all = apiKeys(env);
-  const live = all.filter((k) => (keyCooldown.get(k) || 0) < now);
-  return live.length ? live : all; // if every key is resting, try them anyway
-}
+/** The AI is ready when the Workers AI binding is present (set in wrangler.toml). */
+export const aiAvailable = (env) => !!(env && env.AI);
 
 function systemPrompt(name) {
   const who = name || "חבר/ה";
@@ -37,72 +34,46 @@ function systemPrompt(name) {
   ].join("\n");
 }
 
-// Google changes model names now and then: use GEMINI_MODEL if set, otherwise pick the newest
-// stable "flash" model the key can use (and remember it for a while).
-let picked = null;
-// Names Google keeps pointing at a current model, used when the list can't be read.
-const ALIASES = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite"];
-async function candidates(env, key) {
-  const list = [];
-  if (env.GEMINI_MODEL) list.push(env.GEMINI_MODEL);
-  if (picked && picked.until > Date.now()) list.push(picked.name);
-  try {
-    const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": key } });
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
-      const data = await res.json().catch(() => ({}));
-      const err = new Error(data?.error?.message || `models ${res.status}`);
-      err.status = res.status;
-      throw err;
-    }
-    if (res.ok) {
-      const { models = [] } = await res.json();
-      const ver = (n) => Number((/gemini-(\d+(?:\.\d+)?)/.exec(n) || [])[1] || 0);
-      const ok = models
-        .map((m) => ({ name: m.name.replace(/^models\//, ""), methods: m.supportedGenerationMethods || [] }))
-        .filter((m) => m.methods.includes("generateContent") && /^gemini-([\d.]+-)?flash/.test(m.name)
-          && !/(image|tts|live|audio|embedding|thinking|exp|computer|robotics|native)/.test(m.name));
-      // Stable before preview, newer first, the full flash before lite.
-      ok.sort((a, b) => (/preview/.test(a.name) - /preview/.test(b.name)) || (ver(b.name) - ver(a.name)) || (/lite/.test(a.name) - /lite/.test(b.name)));
-      list.push(...ok.map((m) => m.name));
-    }
-  } catch (e) {
-    if (e.status) throw e; // the key itself is the problem
+// Turn the Gemini-style `contents` ([{role:'user'|'model', parts:[{text}]}]) used across the app
+// into the Workers AI `messages` shape ([{role:'system'|'user'|'assistant', content}]).
+function toMessages(system, contents) {
+  const messages = system ? [{ role: "system", content: system }] : [];
+  for (const c of contents || []) {
+    const role = c.role === "model" ? "assistant" : "user";
+    const text = (c.parts || []).map((p) => p.text || "").join("");
+    messages.push({ role, content: text });
   }
-  list.push(...ALIASES);
-  return [...new Set(list)];
+  return messages;
+}
+
+// Workers AI signals an over-capacity / daily-limit situation in a few ways; treat those like a
+// rate limit (429) so callers can back off or hand the chat to a human, and anything else as 502.
+function wrapError(e) {
+  const msg = String(e?.message || e || "");
+  const limited = /capacity|rate.?limit|too many|quota|daily|limit exceeded|3040|3036/i.test(msg);
+  const err = new Error(msg.slice(0, 300) || "Workers AI error");
+  err.status = limited ? 429 : 502;
+  return err;
 }
 
 /**
- * Ask Gemini for one reply. Rotates across every configured key (skipping any that just hit
- * their quota) and across candidate models. Returns the text, "" when empty, or null when blocked.
+ * Ask Workers AI for one reply. Tries the model list in order (newer/stronger first) and falls
+ * back to a lighter model if one is busy. Returns the text, or "" when the model returns nothing.
  */
 export async function generate(env, { system, contents, temperature = 0.9, maxOutputTokens = 2048 }) {
-  const keys = liveKeys(env);
-  if (!keys.length) { const e = new Error("no key"); e.status = 503; throw e; }
-  const body = JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature, maxOutputTokens } });
+  if (!aiAvailable(env)) { const e = new Error("Workers AI binding missing"); e.status = 503; throw e; }
+  const messages = toMessages(system, contents);
+  const opts = { messages, temperature, max_tokens: maxOutputTokens };
   let last = null;
-  for (const key of keys) {
-    let list;
-    try { list = await candidates(env, key); }
-    catch (e) { last = e; if (e.status === 401 || e.status === 403 || e.status === 400) continue; list = ALIASES; }
-    for (const model of list.slice(0, 6)) {
-      const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
-        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        picked = { name: model, until: Date.now() + 6 * 3600 * 1000 };
-        const parts = (data.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought);
-        const text = parts.map((p) => p.text || "").join("").trim();
-        if (text) return text;
-        if (data.candidates?.[0]?.finishReason === "SAFETY" || data.promptFeedback?.blockReason) return null;
-        return "";
-      }
-      last = new Error(`${model}: ${data?.error?.message || res.status}`);
-      last.status = res.status;
-      if (res.status === 429) { keyCooldown.set(key, Date.now() + KEY_REST); break; } // quota — rest this key, move to the next
-      if (res.status === 401 || res.status === 403 || (res.status === 400 && /api key/i.test(data?.error?.message || ""))) break; // bad key — next key
-      if (picked?.name === model) picked = null; // a model problem: try the next model
+  for (const model of models(env)) {
+    try {
+      const out = await env.AI.run(model, opts);
+      const text = String(out?.response ?? "").trim();
+      return text; // "" is a valid "nothing to say" — the caller decides what to do
+    } catch (e) {
+      last = wrapError(e);
+      if (last.status === 429) continue; // this model is busy — try a lighter one
+      continue; // a model-specific failure (e.g. retired name) — try the next
     }
   }
   throw last || Object.assign(new Error("no working model"), { status: 502 });
@@ -136,7 +107,7 @@ export async function aiRoute(req, env, path, user, h) {
     const now = Date.now();
     await env.DB.prepare("INSERT INTO ai_chat (user_id, role, text, at) VALUES (?, 'user', ?, ?)").bind(user.id, msg, now).run();
     const { results } = await env.DB.prepare("SELECT role, text FROM ai_chat WHERE user_id = ? ORDER BY id DESC LIMIT ?").bind(user.id, HISTORY).all();
-    // Gemini wants turns that alternate and start with the user.
+    // Turns that alternate and start with the user.
     const contents = [];
     for (const r of results.reverse()) {
       const role = r.role === "model" ? "model" : "user";
@@ -154,10 +125,8 @@ export async function aiRoute(req, env, path, user, h) {
       h.log?.("errors", "🤖 מוצ'י לא הצליח לענות", { "סטטוס": String(e?.status || ""), "פרטים": detail });
       // Only admins reach this room, so the technical reason is shown to help fix it.
       if (e?.status === 429) throw new h.HttpError(429, "Mochi needs a short break. Try again in a minute.", "ai_busy", { detail });
-      if (e?.status === 401 || e?.status === 403 || (e?.status === 400 && /api key/i.test(detail))) throw new h.HttpError(502, "The Gemini key isn't working.", "ai_key", { detail });
       throw new h.HttpError(502, "Mochi couldn't answer right now. Try again.", "ai_failed", { detail });
     }
-    if (reply === null) reply = "💗 על זה אני לא יכול/ה לענות. בוא/י נדבר על משהו אחר?";
     if (!reply) reply = "...🤔";
     const at = Date.now();
     const res = await env.DB.prepare("INSERT INTO ai_chat (user_id, role, text, at) VALUES (?, 'model', ?, ?)").bind(user.id, reply.slice(0, 20000), at).run();

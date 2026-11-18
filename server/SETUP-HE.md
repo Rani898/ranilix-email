@@ -182,10 +182,17 @@ npx.cmd wrangler deploy
 - **קבצים מצורפים**: עד 10MB לקובץ, עד 10 קבצים ועד 20MB בסך הכול להודעה. האחסון החינמי של Cloudflare KV מוגבל ל-1GB ולכ-1,000 העלאות ביום.
 - **התראות**: עובדות רק כשהאתר פתוח בלשונית כלשהי בדפדפן.
 
-## החדר הפרטי (צ'אט עם מוצ'י דרך Gemini)
+## החדר הפרטי (צ'אט עם מוצ'י) ומוקד התמיכה החכם — Cloudflare Workers AI
 
-1. נכנסים ל-https://aistudio.google.com/apikey עם חשבון גוגל ולוחצים "Create API key". המפתח בחינם.
-2. ב-GitHub: Settings ← Secrets and variables ← Actions ← New repository secret.
-3. Name: `GEMINI_API_KEY`, Secret: המפתח שהעתקתם. שומרים.
-4. מפעילים מחדש את "Deploy server" (Actions ← Deploy server ← Run workflow), או פשוט מחכים לעדכון הבא.
-השרת בוחר לבד את מודל ה-Flash הכי חדש שזמין למפתח. אפשר לקבוע מודל מסוים עם המשתנה `GEMINI_MODEL`.
+ה-AI (גם החדר של מוצ'י וגם מוקד התמיכה) רץ על **Cloudflare Workers AI**, ישירות בתוך ה-Worker — **בלי מפתח, בלי טוקן ובלי הגדרות**. יש מכסה יומית חינמית נדיבה.
+
+ההפעלה כבר כתובה ב-`wrangler.toml`:
+```toml
+[ai]
+binding = "AI"
+```
+אחרי שה-Worker נפרס (Deploy server), ה-AI פעיל אוטומטית — אין מה להגדיר.
+
+- ברירת המחדל: המודל `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (טוב בעברית). אם הוא עמוס, המערכת עוברת לבד למודל קל יותר.
+- אפשר לבחור מודל אחר עם המשתנה `AI_MODEL` ב-`wrangler.toml` (למשל `@cf/meta/llama-3.1-8b-instruct`).
+- אין צורך ב-`GEMINI_API_KEY` יותר.

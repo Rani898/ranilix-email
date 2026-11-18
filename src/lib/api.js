@@ -177,7 +177,7 @@ demo.aiSend = async (text) => {
   await delay(700);
   const list = demoRead("ai", []);
   const now = Date.now();
-  const message = { id: String(now + 1), role: "model", text: "💗 (בתצוגה הזו מוצ'י רק מתאמן. באתר האמיתי הוא עונה בעזרת Gemini.)", at: now };
+  const message = { id: String(now + 1), role: "model", text: "💗 (בתצוגה הזו מוצ'י רק מתאמן. באתר האמיתי הוא עונה בעזרת Workers AI של Cloudflare.)", at: now };
   demoWrite("ai", [...list, { id: String(now), role: "user", text, at: now }, message]);
   return { message };
 };
