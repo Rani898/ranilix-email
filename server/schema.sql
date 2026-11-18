@@ -15,6 +15,17 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
+-- Device/IP info per session, shown in Settings so a user can see and log out their devices.
+CREATE TABLE IF NOT EXISTS session_info (
+  token_hash TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  ip         TEXT,
+  user_agent TEXT,
+  created_at INTEGER NOT NULL,
+  last_seen  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_info_user ON session_info(user_id);
+
 CREATE TABLE IF NOT EXISTS messages (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

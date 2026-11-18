@@ -224,6 +224,21 @@ export default {
   },
   settings: {
     deleteByTeam: "Want to delete your account? Only the Ranilix team can delete accounts. Write to us in the support chat (the bubble in the corner) and we'll take care of it.",
+    devices: {
+      title: "Signed-in devices",
+      desc: "See where your account is signed in. Don't recognize a device? Log it out and change your password.",
+      thisDevice: "This device",
+      activeNow: "Active now",
+      lastActive: "Last active: {when}",
+      logout: "Log out",
+      logoutOthers: "Log out all other devices",
+      logoutOthersHint: "This device stays signed in. Every other device will have to sign in again.",
+      confirmTitle: "Log out all other devices?",
+      confirmText: "Every device except the one you're on now will be signed out and will have to log in again. A good move if you think someone got into your account.",
+      confirmBtn: "Yes, log them all out",
+      cancel: "Cancel",
+      kind: { phone: "Phone", tablet: "Tablet", computer: "Computer" },
+    },
     autoReply: {
       title: "Auto-reply",
       desc: "On vacation or busy? People who write to you get an automatic answer.",

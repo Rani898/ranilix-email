@@ -210,6 +210,12 @@ demo.getAnnouncement = async () => {
   } catch { return { enabled: false }; }
 };
 live.getMe = () => request("/api/me", { auth: true });
+live.sessions = () => request("/api/sessions", { auth: true });
+live.revokeSession = (id) => request(`/api/sessions/${id}`, { method: "DELETE", auth: true });
+live.revokeOtherSessions = () => request("/api/sessions", { method: "DELETE", auth: true });
+demo.sessions = async () => ({ sessions: [{ id: "demo", device: "computer", os: "Windows", browser: "Chrome", ip: "127.0.0.1", createdAt: Date.now() - 86400000, lastSeen: Date.now(), current: true }] });
+demo.revokeSession = async () => ({ ok: true });
+demo.revokeOtherSessions = async () => ({ ok: true, count: 0 });
 live.getSkin = () => request("/api/skin", { auth: true });
 live.aiChat = () => request("/api/ai/chat", { auth: true });
 live.receipts = (month) => request(`/api/receipts${month ? `?month=${encodeURIComponent(month)}` : ""}`, { auth: true });
@@ -543,6 +549,7 @@ export const {
   getMe, getAnnouncement, checkLatest, getSkin, saveSkin, aiChat, aiSend, aiClear, receipts, receiptsScan, receiptsSettings, receiptsSendSummary, receiptUpdate, events, eventCreate, eventUpdate, eventDelete, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
+  sessions, revokeSession, revokeOtherSessions,
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,

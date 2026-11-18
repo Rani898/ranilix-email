@@ -8,7 +8,7 @@ import PostalMime from "postal-mime";
 import { Buffer } from "node:buffer";
 import { googleRoute } from "./google.js";
 import { supportAdminRoute, supportRoute } from "./support.js";
-import { MAX_CAP_GB, deleteAllDrive, driveCleanup, driveBackend, driveDefaultMb, driveRoute, driveShareRoute, maxQuotaBytes, quotaOf, siteUsed } from "./drive.js";
+import { MAX_CAP_GB, deleteAllDrive, deviceOf, driveCleanup, driveBackend, driveDefaultMb, driveRoute, driveShareRoute, maxQuotaBytes, quotaOf, siteUsed } from "./drive.js";
 import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAutoReply, tempAllowed, tempOwner, tempRoute } from "./extras.js";
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
@@ -156,11 +156,17 @@ async function rateLimit(env, key, limit, windowMs) {
   await env.DB.prepare("UPDATE rate_limits SET count = count + 1 WHERE key = ?").bind(key).run();
 }
 
-async function createSession(env, userId, remember) {
+async function createSession(env, userId, remember, req) {
   const token = randomHex(32);
   const expires = Date.now() + (remember ? 30 * DAY : DAY);
+  const th = await sha256(token);
+  const now = Date.now();
   await env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
-    .bind(await sha256(token), userId, expires).run();
+    .bind(th, userId, expires).run();
+  const ip = req?.headers.get("CF-Connecting-IP") || "local";
+  const ua = (req?.headers.get("User-Agent") || "").slice(0, 400);
+  await env.DB.prepare("INSERT OR REPLACE INTO session_info (token_hash, user_id, ip, user_agent, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(th, userId, ip, ua, now, now).run();
   return token;
 }
 
@@ -168,12 +174,17 @@ async function requireUser(req, env) {
   const auth = req.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   if (!token) throw new HttpError(401, "Please log in.", "session");
+  const th = await sha256(token);
   const row = await env.DB.prepare(
     "SELECT u.id, u.username, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?"
-  ).bind(await sha256(token)).first();
+  ).bind(th).first();
   if (!row || row.expires_at < Date.now()) throw new HttpError(401, "Your session has ended. Please log in again.", "session");
   if (await isSuspended(env, row.id)) throw new HttpError(401, "This account is suspended.", "suspended");
-  return { id: row.id, username: row.username, email: `${row.username}@${env.MAIL_DOMAIN}` };
+  // Keep "last active" fresh for the devices list — only writes once every 15 min per session.
+  const now = Date.now();
+  await env.DB.prepare("UPDATE session_info SET last_seen = ?, ip = ? WHERE token_hash = ? AND last_seen < ?")
+    .bind(now, req.headers.get("CF-Connecting-IP") || "local", th, now - 15 * 60 * 1000).run();
+  return { id: row.id, username: row.username, email: `${row.username}@${env.MAIL_DOMAIN}`, tokenHash: th };
 }
 
 const toClientMessage = (m, attachments = []) => ({
@@ -338,6 +349,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM attachments WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM messages WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM session_info WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM user_meta WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM account_owners WHERE user_id = ?").bind(userId),
@@ -743,7 +755,7 @@ async function route(req, env, log) {
     const welcome = (WELCOME[lang] || WELCOME.en)(email);
     await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
     await env.DB.prepare("INSERT OR IGNORE INTO user_meta (user_id, last_login_at) VALUES (?, ?)").bind(userId, Date.now()).run();
-    const token = await createSession(env, userId, true);
+    const token = await createSession(env, userId, true, req);
     log("signups", "🆕 משתמש חדש", { "כתובת": email, "מדינה": country, "כתובת נוספת של": creator ? `${creator.username}@${env.MAIL_DOMAIN}` : "" });
     return json({ token, email }, 201);
   }
@@ -778,7 +790,7 @@ async function route(req, env, log) {
     if (await isSuspended(env, user.id)) throw new HttpError(403, "This account is suspended.", "suspended");
     await env.DB.prepare("INSERT INTO user_meta (user_id, last_login_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET last_login_at = excluded.last_login_at")
       .bind(user.id, Date.now()).run();
-    const token = await createSession(env, user.id, remember !== false);
+    const token = await createSession(env, user.id, remember !== false, req);
     log("logins", "🔑 התחברות", { "כתובת": `${user.username}@${env.MAIL_DOMAIN}`, "מדינה": country, "זכור אותי": remember !== false ? "כן" : "לא" });
     return json({ token, email: `${user.username}@${env.MAIL_DOMAIN}` });
   }
@@ -789,6 +801,7 @@ async function route(req, env, log) {
       const th = await sha256(auth.slice(7));
       const who = await env.DB.prepare("SELECT u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?").bind(th).first();
       await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(th).run();
+      await env.DB.prepare("DELETE FROM session_info WHERE token_hash = ?").bind(th).run();
       if (who) log("logins", "🚪 התנתקות", { "כתובת": `${who.username}@${env.MAIL_DOMAIN}` });
     }
     return json({ ok: true });
@@ -845,6 +858,39 @@ async function route(req, env, log) {
       tempAllowed: await tempAllowed(env, user, admin), autoReplyOn: autoReplyActive(await getAutoReply(env, user.id)),
       skin: await getSkin(env, user.id),
     });
+  }
+
+  /* ---- Devices / active sessions ---- */
+  if (path === "/api/sessions" && req.method === "GET") {
+    const now = Date.now();
+    // Backfill the current session so sessions that predate this feature still appear.
+    await env.DB.prepare("INSERT OR IGNORE INTO session_info (token_hash, user_id, ip, user_agent, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(user.tokenHash, user.id, req.headers.get("CF-Connecting-IP") || "local", (req.headers.get("User-Agent") || "").slice(0, 400), now, now).run();
+    const { results } = await env.DB.prepare(
+      "SELECT i.token_hash, i.ip, i.user_agent, i.created_at, i.last_seen FROM session_info i JOIN sessions s ON s.token_hash = i.token_hash WHERE i.user_id = ? ORDER BY i.last_seen DESC"
+    ).bind(user.id).all();
+    return json({ sessions: results.map((r) => {
+      const d = deviceOf(r.user_agent || "");
+      return { id: r.token_hash, device: d.device, os: d.os, browser: d.browser, ip: r.ip || "", createdAt: r.created_at, lastSeen: r.last_seen, current: r.token_hash === user.tokenHash };
+    }) });
+  }
+
+  // Log out every other device (keeps the current session). Kills untracked sessions too.
+  if (path === "/api/sessions" && req.method === "DELETE") {
+    const r = await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, user.tokenHash).run();
+    await env.DB.prepare("DELETE FROM session_info WHERE user_id = ? AND token_hash != ?").bind(user.id, user.tokenHash).run();
+    log("security", "🔒 התנתקות מכל המכשירים האחרים", { "כתובת": user.email, "מכשירים": String(r.meta.changes) });
+    return json({ ok: true, count: r.meta.changes });
+  }
+
+  // Log out one specific device.
+  const sessMatch = path.match(/^\/api\/sessions\/([a-f0-9]{64})$/);
+  if (sessMatch && req.method === "DELETE") {
+    const target = sessMatch[1];
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash = ?").bind(user.id, target).run();
+    await env.DB.prepare("DELETE FROM session_info WHERE user_id = ? AND token_hash = ?").bind(user.id, target).run();
+    if (target !== user.tokenHash) log("security", "🔒 מכשיר נותק מהחשבון", { "כתובת": user.email });
+    return json({ ok: true, current: target === user.tokenHash });
   }
 
   if (path.startsWith("/api/receipts")) return receiptsRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, htmlToText, insertMessage, notifyUser });
