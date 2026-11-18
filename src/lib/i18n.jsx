@@ -8,10 +8,15 @@ const I18nContext = createContext(null);
 
 function initialLang() {
   try {
+    // An explicit ?lang=he|en wins (used for language-specific links and search engines), and is remembered.
+    const q = new URLSearchParams(window.location.search).get("lang");
+    if (q && DICTS[q]) { try { localStorage.setItem(KEY, q); } catch { /* ignore */ } return q; }
     const saved = localStorage.getItem(KEY);
     if (saved && DICTS[saved]) return saved;
+    // First visit: match the browser. Hebrew speakers get Hebrew; everyone else English.
+    if (/^he\b/i.test(navigator.language || "")) return "he";
   } catch { /* ignore */ }
-  return "en"; // English by default; visitors can switch to Hebrew and the choice is remembered
+  return "en"; // the choice is remembered once the visitor switches
 }
 
 function lookup(dict, key) {

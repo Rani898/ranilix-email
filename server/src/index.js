@@ -32,6 +32,7 @@ const DEFAULT_ACCOUNTS = 5;
 const USERNAME_MAX = 30;
 const PASSWORD_MIN = 8;
 const PBKDF2_ITERATIONS = 100_000; // Workers' maximum for PBKDF2
+const DUMMY_SALT = "00000000000000000000000000000000"; // 16 bytes hex, for a constant-time login when the user doesn't exist
 const MAX_BODY_CHARS = 100_000;
 const MAX_INBOUND_BYTES = 25 * 1024 * 1024;
 const MAX_FILES = 10;
@@ -692,6 +693,7 @@ async function route(req, env, log) {
   }
 
   if (path === "/api/username-available" && req.method === "GET") {
+    await rateLimit(env, `uavail:${ip}`, 60, 60 * 1000);
     const u = (url.searchParams.get("u") || "").toLowerCase();
     if (validateUsername(u) || RESERVED.has(u) || TEMP_PREFIX_RE.test(u) || isAdmin(env, u)) return json({ available: false });
     const row = await env.DB.prepare("SELECT 1 FROM users WHERE username = ?").bind(u).first();
@@ -761,7 +763,11 @@ async function route(req, env, log) {
     const user = await env.DB.prepare("SELECT id, username, password_hash, salt FROM users WHERE username = ?").bind(u).first();
     // Same message whether the user exists or not, so accounts can't be discovered.
     const fail = new HttpError(401, "That email or password isn't right.", "bad_login");
-    const ok = user && typeof password === "string" && password.length <= 200 && safeEqual(await hashPassword(password, user.salt), user.password_hash);
+    // Always run the slow hash — with a dummy salt when there's no such user — so the
+    // response time is the same either way and can't reveal which addresses exist.
+    const validPw = typeof password === "string" && password.length > 0 && password.length <= 200;
+    const computed = validPw ? await hashPassword(password, user ? user.salt : DUMMY_SALT) : "";
+    const ok = !!user && validPw && safeEqual(computed, user.password_hash);
     if (!ok) {
       await rateLimit(env, failKey, 1_000_000, 15 * 60 * 1000); // just counts failures
       // Only name real addresses: people sometimes type their password into the address field.
@@ -1149,6 +1155,7 @@ const SECURITY_HEADERS = {
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store",
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()",
 };
 
 export default {
