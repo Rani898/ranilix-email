@@ -10,7 +10,7 @@ routes = [{ pattern = "api.ranilix.com", custom_domain = true }]
 # Your mail domain (must match the domain in Cloudflare Email Routing)
 MAIL_DOMAIN = "ranilix.com"
 # Usernames that can open the admin panel (comma-separated, without @domain)
-ADMIN_USERS = "rani,rani4"
+ADMIN_USERS = "rani,rani4,rani67"
 # Google "Connect Gmail" (optional). Paste the OAuth Client ID here; the secret goes in with setup.bat.
 GOOGLE_CLIENT_ID = "300747780411-a4a4qf22jstikdosgg39hq97emkm7alb.apps.googleusercontent.com"
 # Discord bot (optional): Application ID and Public Key from the Developer Portal → General Information.
