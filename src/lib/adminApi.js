@@ -32,6 +32,7 @@ const live = {
   supportStatus: (id, status) => request(`/api/admin/support/${id}`, { method: "PUT", body: { status }, auth: true }),
   supportDelete: (id) => request(`/api/admin/support/${id}`, { method: "DELETE", auth: true }),
   supportOnline: (online) => request("/api/admin/support-settings", { method: "PUT", body: { online }, auth: true }),
+  supportAi: (ai) => request("/api/admin/support-settings", { method: "PUT", body: { ai }, auth: true }),
   sendBroadcast: (subject, body, test) => request("/api/admin/broadcasts", { method: "POST", body: { subject, body, test }, auth: true }),
   settings: () => request("/api/admin/settings", { auth: true }),
   saveSettings: (patch) => request("/api/admin/settings", { method: "PUT", body: patch, auth: true }),
@@ -164,6 +165,7 @@ const demo = {
   supportStatus: (id, status) => supportDemo.adminSetStatus(id, status),
   supportDelete: (id) => supportDemo.adminDelete(id),
   supportOnline: (online) => supportDemo.adminSetOnline(online),
+  supportAi: async (ai) => ({ ai, aiReady: false }),
   async deleteReport(id) { const s = load(); s.reports = demoReports().filter((r) => r.id !== id); save(s); },
   async sendBroadcast(subject, body, test) {
     await delay(500);

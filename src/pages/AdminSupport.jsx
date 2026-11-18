@@ -1,6 +1,6 @@
 // Admin "Support" tab: the conversations people start in the help window, and the replies.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Bot, Check, Globe, Loader2, MessagesSquare, RotateCcw, SendHorizonal, ThumbsDown, ThumbsUp, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Bot, Check, Globe, Loader2, MessagesSquare, RotateCcw, SendHorizonal, Sparkles, ThumbsDown, ThumbsUp, Trash2, UserRound } from "lucide-react";
 import LogoMark from "../components/LogoMark.jsx";
 import { Button, Modal, Toggle } from "../components/ui.jsx";
 import { adminApi } from "../lib/adminApi.js";
@@ -35,6 +35,17 @@ function Message({ m }) {
       <div className="flex flex-col items-end">
         <div dir="auto" className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl rounded-ee-md bg-brand-600 px-3.5 py-2.5 text-sm text-white [unicode-bidi:plaintext]">{m.body}</div>
         <span className="mt-1 text-[11px] text-slate-400">{m.author} · {when(m.createdAt)}</span>
+      </div>
+    );
+  }
+  if (m.sender === "ai") {
+    return (
+      <div className="flex flex-col items-end">
+        <div dir="auto" className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl rounded-ee-md border border-brand-200 bg-brand-50 px-3.5 py-2.5 text-sm text-slate-800 [unicode-bidi:plaintext]">
+          <span className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-brand-700"><Sparkles className="h-3.5 w-3.5" /> {t("admin.support.aiDesk")}</span>
+          {m.body}
+        </div>
+        <span className="mt-1 text-[11px] text-slate-400">{when(m.createdAt)}</span>
       </div>
     );
   }
@@ -127,6 +138,9 @@ function Conversation({ id, onBack, onChanged, toast }) {
         </div>
       </div>
 
+      {data.escalated && th.status !== "closed" && (
+        <p className="flex items-center gap-1.5 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700"><UserRound className="h-3.5 w-3.5" /> {t("admin.support.escalatedNote")}</p>
+      )}
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/50 p-4">
         {data.messages.map((m) => <Message key={m.id} m={m} />)}
         {th.status === "closed" && <p className="text-center text-xs font-semibold text-slate-500">{t("admin.support.closedLine")}</p>}
@@ -191,6 +205,9 @@ export default function SupportTab({ toast, onCount }) {
   const setOnline = async (online) => {
     try { await adminApi.supportOnline(online); setData((d) => ({ ...d, online })); toast(t(online ? "admin.support.onlineOn" : "admin.support.onlineOff")); } catch (e) { toast(errorText(e)); }
   };
+  const setAi = async (ai) => {
+    try { const res = await adminApi.supportAi(ai); setData((d) => ({ ...d, ai, aiReady: res?.aiReady ?? d.aiReady })); toast(t(ai ? "admin.support.aiOn" : "admin.support.aiOff")); } catch (e) { toast(errorText(e)); }
+  };
   const filters = useMemo(() => [["open", data?.open], ["closed", data?.closed], ["all", data?.all]], [data]);
 
   return (
@@ -201,8 +218,12 @@ export default function SupportTab({ toast, onCount }) {
           <p className="mt-1 text-slate-600">{t("admin.support.subtitle")}</p>
         </div>
         {data && (
-          <div className="rounded-2xl border border-slate-200 bg-surface px-4 py-3">
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-surface px-4 py-3">
             <Toggle id="support-online" checked={!!data.online} onChange={setOnline} label={t("admin.support.onlineLabel")} description={t("admin.support.onlineHint")} />
+            <div className="border-t border-slate-100 pt-3">
+              <Toggle id="support-ai" checked={!!data.ai} onChange={setAi} label={t("admin.support.aiLabel")} description={t("admin.support.aiHint")} />
+              {data.ai && !data.aiReady && <p className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-amber-600"><Sparkles className="h-3 w-3" /> {t("admin.support.aiNoKey")}</p>}
+            </div>
           </div>
         )}
       </div>
@@ -245,6 +266,7 @@ export default function SupportTab({ toast, onCount }) {
                         </p>
                         <div className="mt-1 flex items-center gap-1.5">
                           {!th.member && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{t("admin.support.visitor")}</span>}
+                          {th.escalated && th.status !== "closed" && <span className="flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"><UserRound className="h-3 w-3" /> {t("admin.support.escalated")}</span>}
                           {th.status === "closed" && <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">{t("admin.support.solved")}</span>}
                           {th.rating === 1 && <ThumbsUp className="h-3.5 w-3.5 text-emerald-600" aria-label={t("admin.support.ratedGood")} />}
                           {th.rating === -1 && <ThumbsDown className="h-3.5 w-3.5 text-rose-600" aria-label={t("admin.support.ratedBad")} />}

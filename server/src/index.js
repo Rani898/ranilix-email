@@ -816,7 +816,7 @@ async function route(req, env, log) {
 
   // Help window chat: works for visitors too (it checks the login itself).
   if (path.startsWith("/api/support/")) {
-    const res = await supportRoute(req, env, path, { HttpError, json, readJson, rateLimit, log, ip, requireUser, sha256, randomHex });
+    const res = await supportRoute(req, env, path, { HttpError, json, readJson, rateLimit, log, ip, requireUser, sha256, randomHex, insertMessage, notifyUser, ctx: log.ctx });
     if (res) return res;
   }
 

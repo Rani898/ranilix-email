@@ -1,3 +1,4 @@
+import { aiAvailable, generate } from "./ai.js";
 // Live support chat: the help window on the site (visitors and logged-in users) and the admin Support tab.
 // Visitors who aren't logged in get a random key the first time they write; only its hash is stored.
 
@@ -30,6 +31,106 @@ const BOT = {
   },
 };
 const bot = (lang) => BOT[lang === "he" ? "he" : "en"];
+
+
+/* ---- AI support desk: answers on its own, hands off to a human when needed ---- */
+
+const HUMAN_RE = /\b(human|agent|representative|operator|real\s+person|staff|manager)\b|נציג|אנושי|בן\s?אדם|בנאדם|מישהו אמיתי|לדבר עם מישהו|מוקד אנושי|מנהל|רני\b/i;
+const AI_AUTHOR = "מוקד Ranilix";
+
+async function supportAiOn(env) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'support_ai'").first();
+  return row ? row.value === "1" : true; // on by default when a key exists
+}
+const aiActive = async (env) => aiAvailable(env) && (await supportAiOn(env));
+
+async function isEscalated(env, threadId) {
+  return !!(await env.DB.prepare("SELECT 1 FROM support_human WHERE thread_id = ?").bind(threadId).first());
+}
+async function markHuman(env, threadId) {
+  await env.DB.prepare("INSERT OR IGNORE INTO support_human (thread_id, at) VALUES (?, ?)").bind(threadId, Date.now()).run();
+}
+
+function supportPrompt(lang) {
+  const facts = [
+    "Ranilix is a 100% free email service (ranilix.com). A free address like name@ranilix.com, forever, with no ads and no credit card.",
+    "Sign up at ranilix.com/signup — pick a name and password, ready in a minute. Works in any modern browser on phone, tablet and computer.",
+    "Each person can have up to 5 addresses, all free; switch between them from the inbox.",
+    "Temporary (expiring) addresses: make a throwaway address for a site you don't fully trust; it lands in your normal inbox.",
+    "Chrome extension: on any signup page it makes a new Ranilix address + a strong password for that site, and shows the verification code.",
+    "Drive: upload and share files by link. A link can be view-only (download needs the owner's approval), you can see who opened it, block a specific viewer (they can appeal), and change the link so the old one stops working.",
+    "Also: receipts with a monthly summary, a small calendar, and contacts.",
+    "Privacy: we don't read messages for ads and don't sell data. You can delete your account any time, which erases the mailbox and personal data.",
+  ];
+  const he = [
+    "את/ה מוקד השירות של Ranilix — שירות אימייל חינמי. עונים בעברית, קצר, ידידותי ולעניין, כמו בצ'אט תמיכה.",
+    "ענה/י רק לפי העובדות הבאות על Ranilix. אל תמציא/י תכונות, מחירים או הבטחות.",
+    facts.join("\n"),
+    "אם שואלים משהו שאינו קשור ל-Ranilix, החזר/י בעדינות לנושא.",
+    "חשוב: בכל אחד מהמקרים הבאים — המשתמש מבקש נציג אנושי או מנהל; לא הצלחת לעזור; הבעיה נוגעת לחשבון ספציפי (אין גישה, איפוס סיסמה, חשבון נפרץ, מחיקה שלא הצליחה, דיווח על שימוש לרעה, החזר/תשלום) — התחל/י את התשובה בדיוק בתגית [[HUMAN]] בשורה הראשונה, ואז משפט קצר ואדיב שמסביר שאתה מעביר/ה לנציג אנושי. אל תמציא/י פתרון לבעיות חשבון.",
+    "לעולם אל תבקש/י סיסמה, קוד או פרטי תשלום.",
+  ];
+  const en = [
+    "You are the Ranilix support desk — a free email service. Answer in English, short, friendly and to the point, like a support chat.",
+    "Answer only from these facts about Ranilix. Do not invent features, prices or promises.",
+    facts.join("\n"),
+    "If asked something unrelated to Ranilix, gently steer back.",
+    "Important: in any of these cases — the user asks for a human/agent/manager; you couldn't help; the issue is about a specific account (can't sign in, password reset, hacked account, a deletion that failed, reporting abuse, a refund/payment) — begin your reply with exactly the tag [[HUMAN]] on the first line, then one short, polite sentence saying you're passing them to a human. Never invent a fix for account problems.",
+    "Never ask for a password, a code, or payment details.",
+  ];
+  return (lang === "he" ? he : en).join("\n");
+}
+
+/** Hand a conversation to a human (Rani): stop the AI, flag it for the admin queue, notify. */
+async function escalate(env, t, h, reason, note) {
+  const now = Date.now();
+  await markHuman(env, t.id);
+  const handoff = (note && note.trim().length > 1)
+    ? note.trim()
+    : (t.lang === "he" ? "מעביר/ה אותך לנציג אנושי מהצוות של Ranilix, שיענה לך כאן בהקדם 🙌" : "I'm passing you to a human from the Ranilix team — they'll reply here soon 🙌");
+  await addMessage(env, t.id, "ai", AI_AUTHOR, handoff, now);
+  await env.DB.prepare("UPDATE support_threads SET status = 'open', updated_at = ?, last_from = 'ai', last_preview = ?, user_unread = user_unread + 1, admin_unread = admin_unread + 1 WHERE id = ?")
+    .bind(now, handoff.slice(0, PREVIEW), t.id).run();
+  if (t.user_id) await h.notifyUser?.(env, t.user_id);
+  h.log?.("support", "🙋 שיחת תמיכה הועברה לנציג אנושי", { "שיחה": `#${t.id}`, "סיבה": reason, "מאת": t.user_id ? t.email : `אורח${t.name ? ` (${t.name})` : ""}` });
+}
+
+/** The AI reads the conversation and answers, or escalates. Runs in the background (ctx.waitUntil). */
+async function aiReply(env, threadId, h) {
+  try {
+    const t = await env.DB.prepare("SELECT * FROM support_threads WHERE id = ?").bind(threadId).first();
+    if (!t || t.status === "closed" || await isEscalated(env, threadId)) return;
+    const { results } = await env.DB.prepare("SELECT sender, body FROM support_messages WHERE thread_id = ? ORDER BY id DESC LIMIT 16").bind(threadId).all();
+    const msgs = results.reverse().filter((r) => !(r.sender === "bot")); // drop the generic welcome lines
+    if (!msgs.length || msgs[msgs.length - 1].sender !== "user") return;
+    const contents = [];
+    for (const r of msgs) {
+      const role = r.sender === "user" ? "user" : "model";
+      if (contents.length && contents[contents.length - 1].role === role) contents[contents.length - 1].parts[0].text += `\n${r.body}`;
+      else contents.push({ role, parts: [{ text: r.body }] });
+    }
+    while (contents.length && contents[0].role !== "user") contents.shift();
+    if (!contents.length) return;
+    let reply;
+    try { reply = await generate(env, { system: supportPrompt(t.lang), contents, temperature: 0.4, maxOutputTokens: 700 }); }
+    catch (e) { await escalate(env, t, h, `ai_unavailable:${e?.status || ""}`); return; }
+    if (!reply) { await escalate(env, t, h, "ai_blocked"); return; }
+    if (/\[\[HUMAN\]\]/i.test(reply)) { await escalate(env, t, h, "ai_decided", reply.replace(/\[\[HUMAN\]\]/ig, "").trim()); return; }
+    const now = Date.now();
+    await addMessage(env, t.id, "ai", AI_AUTHOR, reply, now);
+    // The AI handled it, so clear the admin queue for this thread (escalation is what flags Rani).
+    await env.DB.prepare("UPDATE support_threads SET updated_at = ?, last_from = 'ai', last_preview = ?, user_unread = user_unread + 1, admin_unread = 0 WHERE id = ?")
+      .bind(now, reply.slice(0, PREVIEW), t.id).run();
+    if (t.user_id) await h.notifyUser?.(env, t.user_id);
+  } catch (e) { console.error("support ai", e); }
+}
+
+/** After a user message: let the AI answer (or escalate) in the background, unless a human owns it. */
+async function handleUserTurn(env, t, userText, h) {
+  if (!(await aiActive(env)) || await isEscalated(env, t.id)) return;
+  const run = HUMAN_RE.test(userText) ? escalate(env, t, h, "user_asked") : aiReply(env, t.id, h);
+  if (h.ctx?.waitUntil) h.ctx.waitUntil(run); else await run;
+}
 
 const clientThread = (t) => ({
   id: String(t.id),
@@ -85,7 +186,7 @@ export async function supportRoute(req, env, path, h) {
   const { HttpError, json, readJson, rateLimit, log, ip } = h;
 
   if (path === "/api/support/info" && req.method === "GET") {
-    return json({ online: await isOnline(env) });
+    return json({ online: await isOnline(env), ai: await aiActive(env) });
   }
 
   if (!path.startsWith("/api/support/threads")) return null;
@@ -133,11 +234,16 @@ export async function supportRoute(req, env, path, h) {
     const id = res.meta.last_row_id;
     await addMessage(env, id, "user", displayName, text, now);
 
-    const b = bot(lang);
-    let auto = b.welcome(await isOnline(env));
-    if (!who.user) auto += `\n\n${guestEmail ? b.guestEmail(guestEmail) : b.guest}`;
-    await addMessage(env, id, "bot", "Ranilix", auto, now + 1);
-    await env.DB.prepare("UPDATE support_threads SET last_preview = ? WHERE id = ?").bind(auto.slice(0, PREVIEW), id).run();
+    const useAI = await aiActive(env);
+    if (!useAI) {
+      const b = bot(lang);
+      let auto = b.welcome(await isOnline(env));
+      if (!who.user) auto += `\n\n${guestEmail ? b.guestEmail(guestEmail) : b.guest}`;
+      await addMessage(env, id, "bot", "Ranilix", auto, now + 1);
+      await env.DB.prepare("UPDATE support_threads SET last_preview = ? WHERE id = ?").bind(auto.slice(0, PREVIEW), id).run();
+    } else if (!who.user && guestEmail) {
+      await addMessage(env, id, "bot", "Ranilix", bot(lang).guestEmail(guestEmail), now + 1); // a short guest note; the AI greets and answers
+    }
 
     log("support", "💬 שיחת תמיכה חדשה", {
       "מאת": who.user ? who.user.email : `אורח${displayName ? ` (${displayName})` : ""}`,
@@ -147,6 +253,7 @@ export async function supportRoute(req, env, path, h) {
     }, text.slice(0, 1500));
 
     const t = await env.DB.prepare("SELECT * FROM support_threads WHERE id = ?").bind(id).first();
+    if (useAI) await handleUserTurn(env, t, text, h);
     const { results } = await env.DB.prepare("SELECT * FROM support_messages WHERE thread_id = ? ORDER BY id").bind(id).all();
     return json({ thread: clientThread(t), messages: results.map(clientMessage), ...(guestKey ? { guestKey } : {}) }, 201);
   }
@@ -178,6 +285,7 @@ export async function supportRoute(req, env, path, h) {
     log("support", t.status === "closed" ? "🔁 שיחת תמיכה נפתחה מחדש" : "💬 הודעה חדשה בשיחת תמיכה", {
       "שיחה": `#${t.id}`, "מאת": t.user_id ? t.email : `אורח${t.name ? ` (${t.name})` : ""}`,
     }, text.slice(0, 1500));
+    await handleUserTurn(env, t, text, h);
     const { results } = await env.DB.prepare("SELECT * FROM support_messages WHERE thread_id = ? AND created_at >= ? ORDER BY id").bind(t.id, now).all();
     return json({ ok: true, messages: results.map(clientMessage) }, 201);
   }
@@ -212,10 +320,16 @@ export async function supportAdminRoute(req, env, admin, path, url, h) {
   if (!path.startsWith("/api/admin/support")) return null;
 
   if (path === "/api/admin/support-settings" && req.method === "PUT") {
-    const { online } = await readJson(req);
-    await h.setSetting(env, "support_online", online ? "1" : "0");
-    log("admin", online ? "🟢 התמיכה סומנה כמחוברת" : "⚪ התמיכה סומנה כלא מחוברת", { "מנהל": admin.email });
-    return json({ online: !!online });
+    const body = await readJson(req);
+    if (typeof body.online === "boolean") {
+      await h.setSetting(env, "support_online", body.online ? "1" : "0");
+      log("admin", body.online ? "🟢 התמיכה סומנה כמחוברת" : "⚪ התמיכה סומנה כלא מחוברת", { "מנהל": admin.email });
+    }
+    if (typeof body.ai === "boolean") {
+      await h.setSetting(env, "support_ai", body.ai ? "1" : "0");
+      log("admin", body.ai ? "🤖 מוקד ה-AI הופעל" : "🤖 מוקד ה-AI כובה", { "מנהל": admin.email });
+    }
+    return json({ online: await isOnline(env), ai: await supportAiOn(env), aiReady: aiAvailable(env) });
   }
 
   if (path === "/api/admin/support" && req.method === "GET") {
@@ -223,10 +337,12 @@ export async function supportAdminRoute(req, env, admin, path, url, h) {
     const where = status === "all" ? "" : "WHERE status = ?";
     const stmt = env.DB.prepare(`SELECT * FROM support_threads ${where} ORDER BY admin_unread > 0 DESC, updated_at DESC LIMIT 200`);
     const { results } = await (status === "all" ? stmt : stmt.bind(status === "closed" ? "closed" : "open")).all();
+    const esc = new Set((await env.DB.prepare("SELECT thread_id FROM support_human").all()).results.map((r) => r.thread_id));
     const counts = await env.DB.prepare("SELECT status, COUNT(*) AS n, COALESCE(SUM(admin_unread > 0), 0) AS u FROM support_threads GROUP BY status").all();
     const c = Object.fromEntries(counts.results.map((r) => [r.status, r]));
     return json({
-      threads: results.map(adminThread),
+      ai: await supportAiOn(env), aiReady: aiAvailable(env),
+      threads: results.map((t) => ({ ...adminThread(t), escalated: esc.has(t.id) })),
       open: c.open?.n || 0,
       closed: c.closed?.n || 0,
       all: (c.open?.n || 0) + (c.closed?.n || 0),
@@ -247,7 +363,8 @@ export async function supportAdminRoute(req, env, admin, path, url, h) {
     if (t.user_id) {
       others = (await env.DB.prepare("SELECT COUNT(*) AS n FROM support_threads WHERE user_id = ? AND id != ?").bind(t.user_id, t.id).first()).n;
     }
-    return json({ thread: { ...adminThread({ ...t, admin_unread: 0 }), otherThreads: others }, messages: results.map(clientMessage) });
+    const escalated = await isEscalated(env, t.id);
+    return json({ thread: { ...adminThread({ ...t, admin_unread: 0 }), otherThreads: others, escalated }, messages: results.map(clientMessage) });
   }
 
   if (m[2] && req.method === "POST") {
@@ -256,6 +373,7 @@ export async function supportAdminRoute(req, env, admin, path, url, h) {
     if (text.length < 1) throw new HttpError(400, "Write a few words first.", "support_short");
     if (text.length > MSG_MAX * 2) throw new HttpError(400, "That message is too long.", "support_long", { max: MSG_MAX * 2 });
     const now = Date.now();
+    await markHuman(env, t.id); // a human answered → the AI steps back on this thread
     await addMessage(env, t.id, "admin", admin.username, text, now);
     await env.DB.prepare("UPDATE support_threads SET status = 'open', updated_at = ?, last_from = 'admin', last_preview = ?, user_unread = user_unread + 1, admin_unread = 0 WHERE id = ?")
       .bind(now, text.slice(0, PREVIEW), t.id).run();
@@ -305,6 +423,7 @@ export async function supportAdminRoute(req, env, admin, path, url, h) {
   if (!m[2] && req.method === "DELETE") {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM support_messages WHERE thread_id = ?").bind(t.id),
+      env.DB.prepare("DELETE FROM support_human WHERE thread_id = ?").bind(t.id),
       env.DB.prepare("DELETE FROM support_threads WHERE id = ?").bind(t.id),
     ]);
     log("admin", "🗑️ שיחת תמיכה נמחקה", { "שיחה": `#${t.id}`, "מנהל": admin.email });

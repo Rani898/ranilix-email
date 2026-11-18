@@ -5,6 +5,24 @@ const API = "https://generativelanguage.googleapis.com/v1beta";
 const HISTORY = 30; // messages sent along so Mochi remembers the conversation
 const MAX_TEXT = 4000;
 
+// A key that hit its quota (429) rests for a while; calls automatically use the next key.
+const keyCooldown = new Map(); // key -> until (ms)
+const KEY_REST = 10 * 60 * 1000;
+
+/** All Gemini keys: GEMINI_API_KEY (one, or several comma-separated) plus GEMINI_API_KEY2..4. */
+export function apiKeys(env) {
+  const raw = [env.GEMINI_API_KEY, env.GEMINI_API_KEY2, env.GEMINI_API_KEY3, env.GEMINI_API_KEY4]
+    .flatMap((k) => String(k || "").split(",")).map((k) => k.trim()).filter(Boolean);
+  return [...new Set(raw)];
+}
+export const aiAvailable = (env) => apiKeys(env).length > 0;
+function liveKeys(env) {
+  const now = Date.now();
+  const all = apiKeys(env);
+  const live = all.filter((k) => (keyCooldown.get(k) || 0) < now);
+  return live.length ? live : all; // if every key is resting, try them anyway
+}
+
 function systemPrompt(name) {
   const who = name || "חבר/ה";
   return [
@@ -24,12 +42,12 @@ function systemPrompt(name) {
 let picked = null;
 // Names Google keeps pointing at a current model, used when the list can't be read.
 const ALIASES = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite"];
-async function candidates(env) {
+async function candidates(env, key) {
   const list = [];
   if (env.GEMINI_MODEL) list.push(env.GEMINI_MODEL);
   if (picked && picked.until > Date.now()) list.push(picked.name);
   try {
-    const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": env.GEMINI_API_KEY } });
+    const res = await fetch(`${API}/models?pageSize=200`, { headers: { "x-goog-api-key": key } });
     if (res.status === 400 || res.status === 401 || res.status === 403) {
       const data = await res.json().catch(() => ({}));
       const err = new Error(data?.error?.message || `models ${res.status}`);
@@ -54,36 +72,44 @@ async function candidates(env) {
   return [...new Set(list)];
 }
 
-async function ask(env, contents, name) {
-  const body = JSON.stringify({
-    systemInstruction: { parts: [{ text: systemPrompt(name) }] },
-    contents,
-    generationConfig: { temperature: 0.9, maxOutputTokens: 4096 },
-  });
+/**
+ * Ask Gemini for one reply. Rotates across every configured key (skipping any that just hit
+ * their quota) and across candidate models. Returns the text, "" when empty, or null when blocked.
+ */
+export async function generate(env, { system, contents, temperature = 0.9, maxOutputTokens = 2048 }) {
+  const keys = liveKeys(env);
+  if (!keys.length) { const e = new Error("no key"); e.status = 503; throw e; }
+  const body = JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature, maxOutputTokens } });
   let last = null;
-  const list = await candidates(env);
-  for (const model of list.slice(0, 6)) {
-    const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
-      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY }, body,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) {
-      picked = { name: model, until: Date.now() + 6 * 3600 * 1000 };
-      // Newer models may send "thoughts" first: keep only the answer.
-      const parts = (data.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought);
-      const text = parts.map((p) => p.text || "").join("").trim();
-      if (text) return text;
-      if (data.candidates?.[0]?.finishReason === "SAFETY" || data.promptFeedback?.blockReason) return null;
-      return "";
+  for (const key of keys) {
+    let list;
+    try { list = await candidates(env, key); }
+    catch (e) { last = e; if (e.status === 401 || e.status === 403 || e.status === 400) continue; list = ALIASES; }
+    for (const model of list.slice(0, 6)) {
+      const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        picked = { name: model, until: Date.now() + 6 * 3600 * 1000 };
+        const parts = (data.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought);
+        const text = parts.map((p) => p.text || "").join("").trim();
+        if (text) return text;
+        if (data.candidates?.[0]?.finishReason === "SAFETY" || data.promptFeedback?.blockReason) return null;
+        return "";
+      }
+      last = new Error(`${model}: ${data?.error?.message || res.status}`);
+      last.status = res.status;
+      if (res.status === 429) { keyCooldown.set(key, Date.now() + KEY_REST); break; } // quota — rest this key, move to the next
+      if (res.status === 401 || res.status === 403 || (res.status === 400 && /api key/i.test(data?.error?.message || ""))) break; // bad key — next key
+      if (picked?.name === model) picked = null; // a model problem: try the next model
     }
-    last = new Error(`${model}: ${data?.error?.message || res.status}`);
-    last.status = res.status;
-    // A wrong key won't get better with another model; a missing/unsupported model might.
-    if (res.status === 401 || res.status === 403 || res.status === 429) throw last;
-    if (res.status === 400 && /api key/i.test(data?.error?.message || "")) throw last;
-    if (picked?.name === model) picked = null;
   }
-  throw last || new Error("no working model");
+  throw last || Object.assign(new Error("no working model"), { status: 502 });
+}
+
+async function ask(env, contents, name) {
+  return generate(env, { system: systemPrompt(name), contents, temperature: 0.9, maxOutputTokens: 4096 });
 }
 
 /** /api/ai/* for a logged-in admin. */
@@ -93,7 +119,7 @@ export async function aiRoute(req, env, path, user, h) {
 
   if (path === "/api/ai/chat" && req.method === "GET") {
     const { results } = await env.DB.prepare("SELECT id, role, text, at FROM ai_chat WHERE user_id = ? ORDER BY id DESC LIMIT 200").bind(user.id).all();
-    return h.json({ ready: !!env.GEMINI_API_KEY, messages: results.reverse().map((r) => ({ id: String(r.id), role: r.role, text: r.text, at: r.at })) });
+    return h.json({ ready: aiAvailable(env), messages: results.reverse().map((r) => ({ id: String(r.id), role: r.role, text: r.text, at: r.at })) });
   }
 
   if (path === "/api/ai/chat" && req.method === "DELETE") {
@@ -102,7 +128,7 @@ export async function aiRoute(req, env, path, user, h) {
   }
 
   if (path === "/api/ai/chat" && req.method === "POST") {
-    if (!env.GEMINI_API_KEY) throw new h.HttpError(503, "The chat isn't connected yet.", "ai_not_ready");
+    if (!aiAvailable(env)) throw new h.HttpError(503, "The chat isn't connected yet.", "ai_not_ready");
     const { text } = await h.readJson(req);
     const msg = String(text || "").trim().slice(0, MAX_TEXT);
     if (!msg) throw new h.HttpError(400, "Write something first.", "ai_empty");

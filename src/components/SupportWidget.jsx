@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft, BookOpen, Bot, CheckCircle2, ChevronLeft, Home, Loader2, MessageCircle, MessagesSquare,
+  ArrowLeft, BookOpen, Bot, CheckCircle2, Sparkles, ChevronLeft, Home, Loader2, MessageCircle, MessagesSquare,
   Search, SendHorizonal, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import LogoMark from "./LogoMark.jsx";
@@ -233,14 +233,17 @@ function Bubble({ m }) {
     );
   }
   const isBot = m.sender === "bot";
+  const isAI = m.sender === "ai";
   return (
     <div className="flex items-end gap-2">
-      {isBot
+      {isAI
+        ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-700" aria-hidden="true"><Sparkles className="h-4 w-4" /></span>
+        : isBot
         ? <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-slate-200 text-slate-600" aria-hidden="true"><Bot className="h-4 w-4" /></span>
         : <TeamAvatar size={28} />}
       <div className="flex max-w-[82%] flex-col items-start">
         <div dir="auto" className={`whitespace-pre-wrap break-words rounded-2xl rounded-es-md px-3.5 py-2.5 text-sm [unicode-bidi:plaintext] ${isBot ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-900"}`}>{m.body}</div>
-        <span className="mt-1 text-[11px] text-slate-400">{isBot ? t("support.auto") : t("support.team")} · {fmt(m.createdAt)}</span>
+        <span className="mt-1 text-[11px] text-slate-400">{isAI ? t("support.aiDesk") : isBot ? t("support.auto") : t("support.team")} · {fmt(m.createdAt)}</span>
       </div>
     </div>
   );

@@ -185,6 +185,12 @@ CREATE TABLE IF NOT EXISTS support_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_support_msgs ON support_messages(thread_id, id);
 
+-- Conversations handed from the AI desk to a human (Rani); the AI stops answering these.
+CREATE TABLE IF NOT EXISTS support_human (
+  thread_id INTEGER PRIMARY KEY,
+  at        INTEGER NOT NULL
+);
+
 -- Auto-reply ("out of office"). One reply per sender every few days (auto_reply_log).
 CREATE TABLE IF NOT EXISTS auto_replies (
   user_id    INTEGER PRIMARY KEY,
