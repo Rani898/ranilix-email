@@ -121,7 +121,7 @@ export async function siteUsed(env) {
 const cleanName = (s) => String(s || "").replace(/[\u0000-\u001f\u007f/\\]/g, "").replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
 
 // A folder cover is an image/GIF; capped small since it's only a thumbnail.
-const COVER_MAX = 5 * MB;
+const COVER_MAX = 15 * MB;
 const COVER_TYPES = /^image\/(png|jpe?g|webp|gif|avif)$/i;
 
 const clientItem = (r) => ({
