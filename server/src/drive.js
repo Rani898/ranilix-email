@@ -120,10 +120,15 @@ export async function siteUsed(env) {
 
 const cleanName = (s) => String(s || "").replace(/[\u0000-\u001f\u007f/\\]/g, "").replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
 
+// A folder cover is an image/GIF; capped small since it's only a thumbnail.
+const COVER_MAX = 5 * MB;
+const COVER_TYPES = /^image\/(png|jpe?g|webp|gif|avif)$/i;
+
 const clientItem = (r) => ({
   id: String(r.id), name: r.name, folder: !!r.is_folder, size: r.size, mime: r.mime || "",
   createdAt: r.created_at, updatedAt: r.updated_at, shared: !!r.share_token, shareToken: r.share_token || null,
   downloads: r.downloads || 0, viewOnly: !!r.view_only, requests: r.pending || 0,
+  cover: r.cover_token ? `/api/drive/cover/${r.cover_token}` : null,
 });
 
 async function ownItem(env, userId, id) {
@@ -216,9 +221,11 @@ async function subtree(env, userId, rootId) {
 /** Delete every drive file of a user (account deletion). */
 export async function deleteAllDrive(env, userId) {
   const { results } = await env.DB.prepare("SELECT storage_key FROM drive_files WHERE user_id = ? AND is_folder = 0").bind(userId).all();
+  const { results: covers } = await env.DB.prepare("SELECT storage_key FROM drive_folder_covers WHERE user_id = ?").bind(userId).all();
+  await env.DB.prepare("DELETE FROM drive_folder_covers WHERE user_id = ?").bind(userId).run();
   await env.DB.prepare("DELETE FROM drive_files WHERE user_id = ?").bind(userId).run();
   await env.DB.prepare("DELETE FROM drive_quota WHERE user_id = ?").bind(userId).run();
-  for (const r of results) if (r.storage_key) await remove(env, r.storage_key);
+  for (const r of [...results, ...covers]) if (r.storage_key) await remove(env, r.storage_key);
 }
 
 /**
@@ -341,6 +348,19 @@ export async function driveShareRoute(req, env, path, h) {
     const got = await getForResponse(env, row.storage_key, req.headers.get("Range"), view ? STREAM_PIECE : 0);
     if (!got) throw new h.HttpError(404, "Not found.", "drive_not_found");
     return fileResponse(got.body, row, view, got);
+  }
+  // A folder cover image: /api/drive/cover/<token> (no login; the token changes whenever the cover does).
+  const cv = path.match(/^\/api\/drive\/cover\/([a-f0-9]{32})$/);
+  if (cv && req.method === "GET") {
+    const row = await env.DB.prepare("SELECT storage_key, mime FROM drive_folder_covers WHERE token = ?").bind(cv[1]).first();
+    if (!row) throw new h.HttpError(404, "Not found.", "drive_not_found");
+    const body = await get(env, row.storage_key);
+    if (!body) throw new h.HttpError(404, "Not found.", "drive_not_found");
+    return new Response(body, { headers: {
+      "Content-Type": row.mime || "image/jpeg",
+      "Cache-Control": "private, max-age=604800, immutable",
+      "X-Content-Type-Options": "nosniff",
+    } });
   }
   // A shared folder: browse it (and its sub-folders) and open the files inside.
   const fm = path.match(/^\/api\/drive\/s\/([a-f0-9]{32})\/(list|file\/(\d+))$/);
@@ -510,9 +530,9 @@ export async function driveRoute(req, env, path, url, user, h) {
   // List a folder
   if (path === "/api/drive" && req.method === "GET") {
     const folder = await folderParam(env, user.id, url.searchParams.get("folder"), HttpError);
-    const { results } = await env.DB.prepare(`SELECT f.*, COALESCE(s.downloads, 0) AS downloads, COALESCE(o.view_only, 0) AS view_only,
+    const { results } = await env.DB.prepare(`SELECT f.*, COALESCE(s.downloads, 0) AS downloads, COALESCE(o.view_only, 0) AS view_only, c.token AS cover_token,
       (SELECT COUNT(*) FROM drive_share_requests q WHERE q.share_id = f.id AND q.status = 'pending') AS pending
-      FROM drive_files f LEFT JOIN drive_share_stats s ON s.file_id = f.id LEFT JOIN drive_share_opts o ON o.file_id = f.id
+      FROM drive_files f LEFT JOIN drive_share_stats s ON s.file_id = f.id LEFT JOIN drive_share_opts o ON o.file_id = f.id LEFT JOIN drive_folder_covers c ON c.folder_id = f.id
       WHERE f.user_id = ? AND f.parent_id IS ? ORDER BY f.is_folder DESC, f.name COLLATE NOCASE LIMIT 1000`)
       .bind(user.id, folder).all();
     return json({ items: results.map(clientItem), path: await breadcrumbs(env, user.id, folder), ...(await usage()) });
@@ -662,10 +682,36 @@ export async function driveRoute(req, env, path, url, user, h) {
     return json({ links });
   }
 
-  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/share-mode|\/link|\/visits|\/requests(?:\/\d+)?|\/block|\/blocks(?:\/\d+)?)?$/);
+  const m = path.match(/^\/api\/drive\/(\d+)(\/download|\/share|\/share-mode|\/link|\/visits|\/requests(?:\/\d+)?|\/block|\/blocks(?:\/\d+)?|\/cover)?$/);
   if (!m) return null;
   const item = await ownItem(env, user.id, m[1]);
   if (!item) throw new HttpError(404, "Not found.", "drive_not_found");
+
+  // Set a folder's cover image/GIF (raw image body).
+  if (m[2] === "/cover" && req.method === "POST") {
+    if (!item.is_folder) throw new HttpError(400, "Only folders can have a cover.", "drive_cover_folder");
+    const mime = (req.headers.get("Content-Type") || "").split(";")[0].trim();
+    if (!COVER_TYPES.test(mime)) throw new HttpError(415, "The cover has to be an image or a GIF.", "drive_cover_type");
+    const body = await req.arrayBuffer();
+    if (!body.byteLength) throw new HttpError(400, "The image is empty.", "drive_cover_empty");
+    if (body.byteLength > COVER_MAX) throw new HttpError(413, "That image is too big.", "drive_cover_big", { max: Math.floor(COVER_MAX / MB) });
+    await h.rateLimit(env, `drive:cover:${user.id}`, 100, 3600 * 1000);
+    const prev = await env.DB.prepare("SELECT storage_key FROM drive_folder_covers WHERE folder_id = ?").bind(item.id).first();
+    const key = `${backend.kind === "r2" ? "drive" : "kvd"}/${user.id}/cover_${h.randomHex(16)}`;
+    await put(env, key, body, mime);
+    const token = h.randomHex(16);
+    const now = Date.now();
+    await env.DB.prepare("INSERT INTO drive_folder_covers (folder_id, user_id, storage_key, mime, token, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(folder_id) DO UPDATE SET storage_key = excluded.storage_key, mime = excluded.mime, token = excluded.token, updated_at = excluded.updated_at")
+      .bind(item.id, user.id, key, mime, token, now).run();
+    if (prev?.storage_key && prev.storage_key !== key) await remove(env, prev.storage_key);
+    return json({ cover: `/api/drive/cover/${token}` });
+  }
+  if (m[2] === "/cover" && req.method === "DELETE") {
+    const prev = await env.DB.prepare("SELECT storage_key FROM drive_folder_covers WHERE folder_id = ?").bind(item.id).first();
+    await env.DB.prepare("DELETE FROM drive_folder_covers WHERE folder_id = ?").bind(item.id).run();
+    if (prev?.storage_key) await remove(env, prev.storage_key);
+    return json({ ok: true });
+  }
 
   if (m[2] === "/download" && req.method === "GET") {
     if (item.is_folder) throw new HttpError(400, "Folders can't be downloaded.", "drive_folder");
@@ -803,6 +849,10 @@ export async function driveRoute(req, env, path, url, user, h) {
       const marks = part.map(() => "?").join(",");
       const { results } = await env.DB.prepare(`SELECT storage_key FROM drive_files WHERE is_folder = 0 AND id IN (${marks})`).bind(...part).all();
       keys.push(...results.map((r) => r.storage_key).filter(Boolean));
+      // Folder covers for any folders in this batch go too.
+      const { results: covers } = await env.DB.prepare(`SELECT storage_key FROM drive_folder_covers WHERE folder_id IN (${marks})`).bind(...part).all();
+      keys.push(...covers.map((r) => r.storage_key).filter(Boolean));
+      await env.DB.prepare(`DELETE FROM drive_folder_covers WHERE folder_id IN (${marks})`).bind(...part).run();
       await env.DB.prepare(`DELETE FROM drive_files WHERE user_id = ? AND id IN (${marks})`).bind(user.id, ...part).run();
     }
     for (const k of keys) await remove(env, k);
@@ -818,6 +868,7 @@ export async function driveCleanup(env) {
   await env.DB.prepare("DELETE FROM drive_share_visits WHERE at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 90 * 24 * 3600 * 1000).run();
   await env.DB.prepare("DELETE FROM drive_share_requests WHERE created_at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 180 * 24 * 3600 * 1000).run();
   await env.DB.prepare("DELETE FROM drive_share_opts WHERE file_id NOT IN (SELECT id FROM drive_files)").run();
+  await env.DB.prepare("DELETE FROM drive_folder_covers WHERE folder_id NOT IN (SELECT id FROM drive_files)").run();
   await env.DB.prepare("DELETE FROM drive_share_blocks WHERE share_id NOT IN (SELECT id FROM drive_files)").run();
   await env.DB.prepare("DELETE FROM drive_share_ids WHERE at < ? OR share_id NOT IN (SELECT id FROM drive_files)").bind(Date.now() - 180 * 24 * 3600 * 1000).run();
   if (!env.DRIVE) return;

@@ -266,6 +266,16 @@ CREATE TABLE IF NOT EXISTS drive_files (
 CREATE INDEX IF NOT EXISTS idx_drive_parent ON drive_files(user_id, parent_id);
 CREATE INDEX IF NOT EXISTS idx_drive_share ON drive_files(share_token);
 CREATE INDEX IF NOT EXISTS idx_drive_key ON drive_files(storage_key);
+-- A cover image/GIF a user can set on a folder (bytes live in the same R2/KV store; token serves it).
+CREATE TABLE IF NOT EXISTS drive_folder_covers (
+  folder_id   INTEGER PRIMARY KEY,
+  user_id     INTEGER NOT NULL,
+  storage_key TEXT NOT NULL,
+  mime        TEXT,
+  token       TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_folder_covers_token ON drive_folder_covers(token);
 -- Per-person drive size set by an admin (otherwise the default from settings).
 CREATE TABLE IF NOT EXISTS drive_quota (
   user_id     INTEGER PRIMARY KEY,

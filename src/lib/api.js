@@ -357,6 +357,10 @@ live.driveList = (folder) => request(`/api/drive${folder ? `?folder=${encodeURIC
 live.driveFolders = () => request("/api/drive/folders", { auth: true });
 live.driveCreateFolder = (name, parent) => request("/api/drive/folder", { method: "POST", body: { name, parent }, auth: true });
 live.driveRename = (id, name) => request(`/api/drive/${id}`, { method: "PATCH", body: { name }, auth: true });
+live.driveSetCover = (id, file) => request(`/api/drive/${id}/cover`, { method: "POST", form: file, headers: { "Content-Type": file.type || "image/png" }, auth: true });
+live.driveRemoveCover = (id) => request(`/api/drive/${id}/cover`, { method: "DELETE", auth: true });
+demo.driveSetCover = async (id, file) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); if (it) { it.cover = await readAsDataUrl(file); demoDriveSave(d); } return { cover: it?.cover || null }; };
+demo.driveRemoveCover = async (id) => { const d = demoDrive(); const it = d.items.find((i) => i.id === id); if (it) { delete it.cover; demoDriveSave(d); } return { ok: true }; };
 live.driveMove = (id, parent) => request(`/api/drive/${id}`, { method: "PATCH", body: { parent }, auth: true });
 live.driveDelete = (id) => request(`/api/drive/${id}`, { method: "DELETE", auth: true });
 live.driveShare = (id, on) => request(`/api/drive/${id}/share`, { method: "POST", body: { on }, auth: true });
@@ -553,6 +557,6 @@ export const {
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
-  driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveShareReset, driveSaveAttachment,
+  driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveShareReset, driveSaveAttachment, driveSetCover, driveRemoveCover,
   driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits, driveShareBlocks, driveShareBlock, driveShareUnblock, sharedRequest, sharedAppeal, driveShareMode, driveShareRequests, driveShareDecide,
 } = api;

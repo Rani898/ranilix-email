@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Check, Play, LayoutGrid, List, MoreHorizontal, MoreVertical, Square, CheckSquare, ChevronLeft, CloudUpload, Copy, Download, ExternalLink, Eye, FileAudio,
-  Ban, Folder, FolderInput, FolderPlus, HardDrive, Link2, Loader2, Lock, Monitor, Inbox as InboxIcon, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
+  Ban, Folder, FolderInput, FolderPlus, HardDrive, Image as ImageIcon, ImageOff, Link2, Loader2, Lock, Monitor, Inbox as InboxIcon, Pencil, RefreshCw, Search, Smartphone, Tablet, Trash2, Users, X,
 } from "lucide-react";
-import { BRAND, DEMO_MODE } from "../config.js";
+import { API_URL, BRAND, DEMO_MODE } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
 import { Button, Modal, Toggle } from "../components/ui.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
@@ -13,8 +13,11 @@ import { formatBytes } from "../lib/validation.js";
 import { previewKind, typeOf } from "../lib/fileTypes.js";
 import { useVideoThumb } from "../lib/videoThumbs.js";
 import {
-  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRename, driveShare, driveShareBlock, driveShareBlocks, driveShareReset, driveShareDecide, driveShareMode, driveShareRequests, driveShareUnblock, driveShareUrl, driveShareVisits, driveUpload,
+  AuthError, driveCreateFolder, driveDelete, driveDownload, driveFolders, driveLink, driveLinks, driveList, driveMove, driveRemoveCover, driveRename, driveSetCover, driveShare, driveShareBlock, driveShareBlocks, driveShareReset, driveShareDecide, driveShareMode, driveShareRequests, driveShareUnblock, driveShareUrl, driveShareVisits, driveUpload,
 } from "../lib/api.js";
+
+/** A folder cover can be a server path (prefix the API host) or, in demo mode, a data URL. */
+const coverSrc = (cover) => (cover ? (cover.startsWith("/") ? `${API_URL}${cover}` : cover) : null);
 
 function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -574,6 +577,19 @@ function Drive({ email }) {
     download(item);
   };
 
+  // Folder cover: pick an image/GIF with a hidden file input, upload it, then refresh.
+  const coverInput = useRef(null);
+  const coverTarget = useRef(null);
+  const pickCover = (id) => { coverTarget.current = id; coverInput.current?.click(); };
+  const onCoverFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    const id = coverTarget.current;
+    if (!file || !id) return;
+    try { await driveSetCover(id, file); load(); } catch (err) { handle(err); }
+  };
+  const removeCover = async (id) => { try { await driveRemoveCover(id); load(); } catch (e) { handle(e); } };
+
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return (data?.items || []).filter((i) => !q || i.name.toLowerCase().includes(q));
@@ -592,6 +608,10 @@ function Drive({ email }) {
   const actionsFor = (item) => [
     ...(previewKind(item) ? [{ label: previewKind(item) === "image" ? t("drive.view") : t("drive.play"), icon: previewKind(item) === "image" ? Eye : Play, onClick: () => open(item) }] : []),
     ...(item.folder ? [] : [{ label: t("drive.download"), icon: Download, onClick: () => download(item) }]),
+    ...(item.folder ? [
+      { label: item.cover ? t("drive.changeCover") : t("drive.setCover"), icon: ImageIcon, onClick: () => pickCover(item.id) },
+      ...(item.cover ? [{ label: t("drive.removeCover"), icon: ImageOff, onClick: () => removeCover(item.id) }] : []),
+    ] : []),
     { label: t("drive.share"), icon: Link2, onClick: () => setDialog({ kind: "share", item }) },
     { label: t("drive.rename"), icon: Pencil, onClick: () => setDialog({ kind: "rename", item }) },
     { label: t("drive.move"), icon: FolderInput, onClick: () => setDialog({ kind: "move", item }) },
@@ -611,6 +631,7 @@ function Drive({ email }) {
 
   return (
     <div className="min-h-dvh bg-slate-50" {...dropHandlers}>
+      <input ref={coverInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" className="hidden" onChange={onCoverFile} />
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-surface/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link to="/inbox" className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100">
@@ -725,7 +746,9 @@ function Drive({ email }) {
                       {<IconBtn label={t("drive.share")} icon={Link2} onClick={() => setDialog({ kind: "share", item })} />}
                       <IconBtn label={t("drive.rename")} icon={Pencil} onClick={() => setDialog({ kind: "rename", item })} className="max-sm:hidden" />
                       <IconBtn label={t("drive.move")} icon={FolderInput} onClick={() => setDialog({ kind: "move", item })} className="max-sm:hidden" />
-                      <IconBtn label={t("drive.delete")} icon={Trash2} danger onClick={() => setDialog({ kind: "delete", item })} />
+                      {item.folder
+                        ? <ItemMenu item={item} actions={actionsFor(item)} />
+                        : <IconBtn label={t("drive.delete")} icon={Trash2} danger onClick={() => setDialog({ kind: "delete", item })} />}
                     </div>
                   </li>
                 );
@@ -882,6 +905,7 @@ function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, 
   const startPreview = () => { if (kind === "video" && thumb) setHover(true); };
   const stopPreview = () => { setHover(false); setPlaying(false); };
   const media = !item.folder && thumb && !broken && (kind === "image" || (kind === "video" && (vt.poster || hover)));
+  const cover = item.folder && !broken ? coverSrc(item.cover) : null;
   const showBox = selecting || selected;
   return (
     <li className="group relative">
@@ -889,7 +913,9 @@ function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, 
         className="block w-full rounded-xl text-start focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-300"
         onMouseEnter={kind === "video" ? startPreview : undefined} onMouseLeave={kind === "video" ? stopPreview : undefined}
         onFocus={kind === "video" ? startPreview : undefined} onBlur={kind === "video" ? stopPreview : undefined}>
-        <span ref={box} className={`relative block overflow-hidden rounded-xl ${large ? "aspect-video" : "aspect-square"} ${media ? "bg-[#1c1c1e]" : item.folder ? "bg-amber-50" : "bg-slate-100"} ${selected ? "ring-4 ring-brand-500 ring-offset-2 ring-offset-surface" : ""}`}>
+        <span ref={box} className={`relative block overflow-hidden rounded-xl ${large ? "aspect-video" : "aspect-square"} ${media || cover ? "bg-[#1c1c1e]" : item.folder ? "bg-amber-50" : "bg-slate-100"} ${selected ? "ring-4 ring-brand-500 ring-offset-2 ring-offset-surface" : ""}`}>
+          {cover && <img src={cover} alt="" loading="lazy" onError={() => setBroken(true)} className={`h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : "group-hover:scale-[1.03]"}`} />}
+          {cover && <span className="absolute bottom-2 end-2 grid h-6 w-6 place-items-center rounded-full bg-black/55 text-white backdrop-blur" title={t("drive.folder")}><Folder className="h-3.5 w-3.5" aria-hidden="true" /></span>}
           {media && kind === "image" && <img src={thumb} alt="" loading="lazy" onError={() => setBroken(true)} className={`h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : "group-hover:scale-[1.03]"}`} />}
           {media && kind === "video" && vt.poster && <img src={vt.poster} alt="" className={`absolute inset-0 h-full w-full object-cover transition duration-300 ${selected ? "scale-[0.94] rounded-lg" : ""}`} />}
           {media && kind === "video" && hover && (
@@ -903,7 +929,7 @@ function Tile({ item, thumb, large, onOpen, actions, meta, selected, selecting, 
               {playing ? <Play className="h-2.5 w-2.5 fill-current" aria-hidden="true" /> : null}{mmss(duration)}
             </span>
           )}
-          {!media && (
+          {!media && !cover && (
             <span className="absolute inset-0 flex flex-col items-center justify-center gap-2">
               <span className={`grid place-items-center rounded-2xl ${large ? "h-20 w-20" : "h-14 w-14"} ${item.folder ? "text-amber-500" : tone}`}><Icon className={large ? "h-10 w-10" : "h-8 w-8"} aria-hidden="true" /></span>
               {!item.folder && ext && <span className="rounded bg-surface/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-500">{ext}</span>}
