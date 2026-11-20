@@ -15,16 +15,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
--- Device/IP info per session, shown in Settings so a user can see and log out their devices.
-CREATE TABLE IF NOT EXISTS session_info (
+-- Device/IP/location info per session, shown in Settings so a user can see and log out their devices.
+-- Replaces the earlier session_info table (dropped below) with added geo columns from Cloudflare.
+DROP TABLE IF EXISTS session_info;
+CREATE TABLE IF NOT EXISTS device_sessions (
   token_hash TEXT PRIMARY KEY,
   user_id    INTEGER NOT NULL,
   ip         TEXT,
   user_agent TEXT,
+  country    TEXT,
+  city       TEXT,
+  region     TEXT,
+  timezone   TEXT,
+  network    TEXT,
   created_at INTEGER NOT NULL,
   last_seen  INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_session_info_user ON session_info(user_id);
+CREATE INDEX IF NOT EXISTS idx_device_sessions_user ON device_sessions(user_id);
 
 CREATE TABLE IF NOT EXISTS messages (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

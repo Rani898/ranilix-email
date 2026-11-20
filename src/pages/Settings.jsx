@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { ArrowLeft, Bell, Camera, Check, KeyRound, Loader2, LogOut, Monitor, Palmtree, ShieldCheck, Smartphone, Tablet, Trash2, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, Camera, Check, Clock, Globe, KeyRound, Loader2, LogOut, MapPin, Monitor, Palmtree, ShieldCheck, Smartphone, Tablet, Trash2, UserRound, Wifi } from "lucide-react";
 import { BRAND } from "../config.js";
 import LogoMark from "../components/LogoMark.jsx";
 import SenderAvatar from "../components/SenderAvatar.jsx";
@@ -408,7 +408,11 @@ function DevicesSection({ onAuth }) {
     if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
     return d.toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
   };
+  const dateOf = (ts) => new Date(ts).toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
   const label = (s) => [s.os, s.browser].filter(Boolean).join(" · ") || t(`settings.devices.kind.${s.device}`);
+  const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : "";
+  const countryName = (cc) => { try { return cc ? new Intl.DisplayNames([locale], { type: "region" }).of(cc) : ""; } catch { return cc; } };
+  const place = (s) => [s.city, s.region && s.region !== s.city ? s.region : "", countryName(s.country)].filter(Boolean).join(", ");
 
   const revokeOne = async (id) => {
     setBusy(id); setError("");
@@ -434,20 +438,29 @@ function DevicesSection({ onAuth }) {
         <>
           <ul className="divide-y divide-slate-100">
             {list.map((s) => (
-              <li key={s.id} className="flex items-center gap-3 py-3">
-                <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${s.current ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-500"}`}><DeviceIcon kind={s.device} /></span>
-                <div className="min-w-0 flex-1">
+              <li key={s.id} className="flex items-start gap-3 py-3.5">
+                <span className={`mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full ${s.current ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-500"}`}><DeviceIcon kind={s.device} /></span>
+                <div className="min-w-0 flex-1 space-y-1">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
                     {label(s)}
                     {s.current && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{t("settings.devices.thisDevice")}</span>}
                   </p>
-                  <p className="truncate text-xs text-slate-500">
-                    {s.ip && <bdi dir="ltr">{s.ip}</bdi>}{s.ip ? " · " : ""}{t("settings.devices.lastActive", { when: when(s.lastSeen) })}
+                  <p className="flex items-center gap-1.5 text-xs text-slate-600">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    {place(s) ? <span>{flag(s.country)} {place(s)}</span> : <span className="text-slate-400">{t("settings.devices.locationUnknown")}</span>}
+                  </p>
+                  <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                    {s.ip && <span className="inline-flex items-center gap-1"><Globe className="h-3.5 w-3.5 text-slate-400" /><bdi dir="ltr">{s.ip}</bdi></span>}
+                    {s.network && <span className="inline-flex items-center gap-1"><Wifi className="h-3.5 w-3.5 text-slate-400" />{s.network}</span>}
+                    {s.timezone && <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5 text-slate-400" /><bdi dir="ltr">{s.timezone}</bdi></span>}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {t("settings.devices.lastActive", { when: when(s.lastSeen) })} · {t("settings.devices.from", { when: dateOf(s.createdAt) })}
                   </p>
                 </div>
                 {!s.current && (
                   <button type="button" onClick={() => revokeOne(s.id)} disabled={!!busy}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50">
+                    className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50">
                     {busy === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LogOut className="h-3.5 w-3.5" />} {t("settings.devices.logout")}
                   </button>
                 )}

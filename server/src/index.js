@@ -156,6 +156,20 @@ async function rateLimit(env, key, limit, windowMs) {
   await env.DB.prepare("UPDATE rate_limits SET count = count + 1 WHERE key = ?").bind(key).run();
 }
 
+// Cloudflare fills request.cf at the edge with the visitor's approximate location and network.
+// (Empty in local dev — handled with optional chaining.)
+function geoOf(req) {
+  const cf = req?.cf || {};
+  return {
+    ip: req?.headers.get("CF-Connecting-IP") || "local",
+    country: String(cf.country || "").slice(0, 2),
+    city: String(cf.city || "").slice(0, 80),
+    region: String(cf.region || "").slice(0, 80),
+    timezone: String(cf.timezone || "").slice(0, 60),
+    network: String(cf.asOrganization || "").slice(0, 80),
+  };
+}
+
 async function createSession(env, userId, remember, req) {
   const token = randomHex(32);
   const expires = Date.now() + (remember ? 30 * DAY : DAY);
@@ -163,10 +177,10 @@ async function createSession(env, userId, remember, req) {
   const now = Date.now();
   await env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
     .bind(th, userId, expires).run();
-  const ip = req?.headers.get("CF-Connecting-IP") || "local";
+  const g = geoOf(req);
   const ua = (req?.headers.get("User-Agent") || "").slice(0, 400);
-  await env.DB.prepare("INSERT OR REPLACE INTO session_info (token_hash, user_id, ip, user_agent, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(th, userId, ip, ua, now, now).run();
+  await env.DB.prepare("INSERT OR REPLACE INTO device_sessions (token_hash, user_id, ip, user_agent, country, city, region, timezone, network, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(th, userId, g.ip, ua, g.country, g.city, g.region, g.timezone, g.network, now, now).run();
   return token;
 }
 
@@ -180,10 +194,11 @@ async function requireUser(req, env) {
   ).bind(th).first();
   if (!row || row.expires_at < Date.now()) throw new HttpError(401, "Your session has ended. Please log in again.", "session");
   if (await isSuspended(env, row.id)) throw new HttpError(401, "This account is suspended.", "suspended");
-  // Keep "last active" fresh for the devices list — only writes once every 15 min per session.
+  // Keep "last active" and location fresh for the devices list — writes once every 15 min per session.
   const now = Date.now();
-  await env.DB.prepare("UPDATE session_info SET last_seen = ?, ip = ? WHERE token_hash = ? AND last_seen < ?")
-    .bind(now, req.headers.get("CF-Connecting-IP") || "local", th, now - 15 * 60 * 1000).run();
+  const g = geoOf(req);
+  await env.DB.prepare("UPDATE device_sessions SET last_seen = ?, ip = ?, country = ?, city = ?, region = ?, timezone = ?, network = ? WHERE token_hash = ? AND last_seen < ?")
+    .bind(now, g.ip, g.country, g.city, g.region, g.timezone, g.network, th, now - 15 * 60 * 1000).run();
   return { id: row.id, username: row.username, email: `${row.username}@${env.MAIL_DOMAIN}`, tokenHash: th };
 }
 
@@ -349,7 +364,7 @@ async function deleteUserCompletely(env, userId) {
     env.DB.prepare("DELETE FROM attachments WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM messages WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
-    env.DB.prepare("DELETE FROM session_info WHERE user_id = ?").bind(userId),
+    env.DB.prepare("DELETE FROM device_sessions WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM user_meta WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM google_accounts WHERE user_id = ?").bind(userId),
     env.DB.prepare("DELETE FROM account_owners WHERE user_id = ?").bind(userId),
@@ -801,7 +816,7 @@ async function route(req, env, log) {
       const th = await sha256(auth.slice(7));
       const who = await env.DB.prepare("SELECT u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?").bind(th).first();
       await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(th).run();
-      await env.DB.prepare("DELETE FROM session_info WHERE token_hash = ?").bind(th).run();
+      await env.DB.prepare("DELETE FROM device_sessions WHERE token_hash = ?").bind(th).run();
       if (who) log("logins", "🚪 התנתקות", { "כתובת": `${who.username}@${env.MAIL_DOMAIN}` });
     }
     return json({ ok: true });
@@ -863,22 +878,28 @@ async function route(req, env, log) {
   /* ---- Devices / active sessions ---- */
   if (path === "/api/sessions" && req.method === "GET") {
     const now = Date.now();
+    const g = geoOf(req);
     // Backfill the current session so sessions that predate this feature still appear.
-    await env.DB.prepare("INSERT OR IGNORE INTO session_info (token_hash, user_id, ip, user_agent, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(user.tokenHash, user.id, req.headers.get("CF-Connecting-IP") || "local", (req.headers.get("User-Agent") || "").slice(0, 400), now, now).run();
+    await env.DB.prepare("INSERT OR IGNORE INTO device_sessions (token_hash, user_id, ip, user_agent, country, city, region, timezone, network, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(user.tokenHash, user.id, g.ip, (req.headers.get("User-Agent") || "").slice(0, 400), g.country, g.city, g.region, g.timezone, g.network, now, now).run();
     const { results } = await env.DB.prepare(
-      "SELECT i.token_hash, i.ip, i.user_agent, i.created_at, i.last_seen FROM session_info i JOIN sessions s ON s.token_hash = i.token_hash WHERE i.user_id = ? ORDER BY i.last_seen DESC"
+      "SELECT i.token_hash, i.ip, i.user_agent, i.country, i.city, i.region, i.timezone, i.network, i.created_at, i.last_seen FROM device_sessions i JOIN sessions s ON s.token_hash = i.token_hash WHERE i.user_id = ? ORDER BY i.last_seen DESC"
     ).bind(user.id).all();
     return json({ sessions: results.map((r) => {
       const d = deviceOf(r.user_agent || "");
-      return { id: r.token_hash, device: d.device, os: d.os, browser: d.browser, ip: r.ip || "", createdAt: r.created_at, lastSeen: r.last_seen, current: r.token_hash === user.tokenHash };
+      return {
+        id: r.token_hash, device: d.device, os: d.os, browser: d.browser,
+        ip: r.ip || "", country: r.country || "", city: r.city || "", region: r.region || "",
+        timezone: r.timezone || "", network: r.network || "",
+        createdAt: r.created_at, lastSeen: r.last_seen, current: r.token_hash === user.tokenHash,
+      };
     }) });
   }
 
   // Log out every other device (keeps the current session). Kills untracked sessions too.
   if (path === "/api/sessions" && req.method === "DELETE") {
     const r = await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, user.tokenHash).run();
-    await env.DB.prepare("DELETE FROM session_info WHERE user_id = ? AND token_hash != ?").bind(user.id, user.tokenHash).run();
+    await env.DB.prepare("DELETE FROM device_sessions WHERE user_id = ? AND token_hash != ?").bind(user.id, user.tokenHash).run();
     log("security", "🔒 התנתקות מכל המכשירים האחרים", { "כתובת": user.email, "מכשירים": String(r.meta.changes) });
     return json({ ok: true, count: r.meta.changes });
   }
@@ -888,7 +909,7 @@ async function route(req, env, log) {
   if (sessMatch && req.method === "DELETE") {
     const target = sessMatch[1];
     await env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash = ?").bind(user.id, target).run();
-    await env.DB.prepare("DELETE FROM session_info WHERE user_id = ? AND token_hash = ?").bind(user.id, target).run();
+    await env.DB.prepare("DELETE FROM device_sessions WHERE user_id = ? AND token_hash = ?").bind(user.id, target).run();
     if (target !== user.tokenHash) log("security", "🔒 מכשיר נותק מהחשבון", { "כתובת": user.email });
     return json({ ok: true, current: target === user.tokenHash });
   }

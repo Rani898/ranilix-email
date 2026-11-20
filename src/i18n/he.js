@@ -230,6 +230,8 @@ export default {
       thisDevice: "המכשיר הזה",
       activeNow: "פעיל עכשיו",
       lastActive: "פעיל לאחרונה: {when}",
+      from: "מחובר מאז {when}",
+      locationUnknown: "מיקום לא ידוע",
       logout: "התנתק",
       logoutOthers: "התנתק מכל שאר המכשירים",
       logoutOthersHint: "המכשיר הזה יישאר מחובר. כל שאר המכשירים יצטרכו להתחבר מחדש.",

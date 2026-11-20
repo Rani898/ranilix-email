@@ -230,6 +230,8 @@ export default {
       thisDevice: "This device",
       activeNow: "Active now",
       lastActive: "Last active: {when}",
+      from: "Signed in since {when}",
+      locationUnknown: "Location unknown",
       logout: "Log out",
       logoutOthers: "Log out all other devices",
       logoutOthersHint: "This device stays signed in. Every other device will have to sign in again.",

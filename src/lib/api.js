@@ -213,7 +213,7 @@ live.getMe = () => request("/api/me", { auth: true });
 live.sessions = () => request("/api/sessions", { auth: true });
 live.revokeSession = (id) => request(`/api/sessions/${id}`, { method: "DELETE", auth: true });
 live.revokeOtherSessions = () => request("/api/sessions", { method: "DELETE", auth: true });
-demo.sessions = async () => ({ sessions: [{ id: "demo", device: "computer", os: "Windows", browser: "Chrome", ip: "127.0.0.1", createdAt: Date.now() - 86400000, lastSeen: Date.now(), current: true }] });
+demo.sessions = async () => ({ sessions: [{ id: "demo", device: "computer", os: "Windows", browser: "Chrome", ip: "127.0.0.1", country: "IL", city: "Tel Aviv", region: "Tel Aviv District", timezone: "Asia/Jerusalem", network: "Demo ISP", createdAt: Date.now() - 86400000, lastSeen: Date.now(), current: true }] });
 demo.revokeSession = async () => ({ ok: true });
 demo.revokeOtherSessions = async () => ({ ok: true, count: 0 });
 live.getSkin = () => request("/api/skin", { auth: true });
