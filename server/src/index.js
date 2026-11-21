@@ -888,7 +888,7 @@ async function route(req, env, log) {
     return json({ sessions: results.map((r) => {
       const d = deviceOf(r.user_agent || "");
       return {
-        id: r.token_hash, device: d.device, os: d.os, browser: d.browser,
+        id: r.token_hash, device: d.device, os: d.os, osVersion: d.osVersion || "", model: d.model || "", browser: d.browser,
         ip: r.ip || "", country: r.country || "", city: r.city || "", region: r.region || "",
         timezone: r.timezone || "", network: r.network || "",
         createdAt: r.created_at, lastSeen: r.last_seen, current: r.token_hash === user.tokenHash,

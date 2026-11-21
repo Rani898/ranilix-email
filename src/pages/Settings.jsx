@@ -409,7 +409,8 @@ function DevicesSection({ onAuth }) {
     return d.toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
   };
   const dateOf = (ts) => new Date(ts).toLocaleDateString(locale, { day: "numeric", month: "short", year: "numeric" });
-  const label = (s) => [s.os, s.browser].filter(Boolean).join(" · ") || t(`settings.devices.kind.${s.device}`);
+  const osLabel = (s) => [s.os, s.osVersion].filter(Boolean).join(" ");
+  const label = (s) => [osLabel(s), s.browser].filter(Boolean).join(" · ") || t(`settings.devices.kind.${s.device}`);
   const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : "";
   const countryName = (cc) => { try { return cc ? new Intl.DisplayNames([locale], { type: "region" }).of(cc) : ""; } catch { return cc; } };
   const place = (s) => [s.city, s.region && s.region !== s.city ? s.region : "", countryName(s.country)].filter(Boolean).join(", ");
@@ -441,8 +442,9 @@ function DevicesSection({ onAuth }) {
               <li key={s.id} className="flex items-start gap-3 py-3.5">
                 <span className={`mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full ${s.current ? "bg-brand-100 text-brand-700" : "bg-slate-100 text-slate-500"}`}><DeviceIcon kind={s.device} /></span>
                 <div className="min-w-0 flex-1 space-y-1">
-                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-slate-900">
                     {label(s)}
+                    {s.model && <span className="font-normal text-slate-500">· <bdi dir="ltr">{s.model}</bdi></span>}
                     {s.current && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{t("settings.devices.thisDevice")}</span>}
                   </p>
                   <p className="flex items-center gap-1.5 text-xs text-slate-600">

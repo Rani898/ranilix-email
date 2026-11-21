@@ -248,16 +248,43 @@ async function insideShared(env, root, id) {
 
 /* ---- Who opened a shared link (for the person who shared it) ---- */
 
-/** Kind of device, system and browser, from the browser's own description. */
+/** Kind of device, system (with version), model and browser, from the browser's own description. */
 export function deviceOf(ua = "") {
   const device = /iPad|Tablet|Tab(?!le)|SM-T|Kindle|Silk/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua)) ? "tablet"
     : /Mobi|iPhone|iPod|Android/i.test(ua) ? "phone" : "computer";
-  const os = /iPhone|iPod/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android"
-    : /Windows/.test(ua) ? "Windows" : /CrOS/.test(ua) ? "ChromeOS" : /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+  let os = "";
+  let osVersion = "";
+  let model = "";
+  let m;
+  if (/iPhone|iPod/.test(ua)) {
+    os = "iOS"; // Apple doesn't put the model in the UA.
+    m = /OS (\d+)[_.](\d+)/.exec(ua); if (m) osVersion = `${m[1]}.${m[2]}`;
+  } else if (/iPad/.test(ua)) {
+    os = "iPadOS";
+    m = /OS (\d+)[_.](\d+)/.exec(ua); if (m) osVersion = `${m[1]}.${m[2]}`;
+  } else if (/Android/.test(ua)) {
+    os = "Android";
+    m = /Android (\d+(?:\.\d+)?)/.exec(ua); if (m) osVersion = m[1];
+    // Many Android UAs carry the model: "...; Android 14; SM-S911B Build/..." or "...; Pixel 8)".
+    const after = ua.split(/Android[^;]*;/)[1] || "";
+    const mm = /\s*([^;()]+?)\s*(?:Build\/|\))/.exec(after);
+    if (mm) { const cand = mm[1].trim(); if (cand && !/^(wv|[a-z]{2}-[a-z]{2})$/i.test(cand) && cand.length >= 2 && cand.length <= 40) model = cand; }
+  } else if (/Windows NT/.test(ua)) {
+    os = "Windows";
+    // NT 10.0 covers both 10 and 11 (indistinguishable from the UA), so only older versions are named.
+    const map = { "6.3": "8.1", "6.2": "8", "6.1": "7" };
+    m = /Windows NT (\d+\.\d+)/.exec(ua); osVersion = (m && map[m[1]]) || "";
+  } else if (/CrOS/.test(ua)) {
+    os = "ChromeOS";
+  } else if (/Mac OS X|Macintosh/.test(ua)) {
+    os = "macOS"; // Safari freezes the version at 10_15_7, so it isn't reported.
+  } else if (/Linux/.test(ua)) {
+    os = "Linux";
+  }
   const browser = /Edg\//.test(ua) ? "Edge" : /OPR\/|Opera/.test(ua) ? "Opera" : /SamsungBrowser/.test(ua) ? "Samsung Internet"
     : /FBAN|FBAV|Instagram/.test(ua) ? "Facebook/Instagram" : /WhatsApp/.test(ua) ? "WhatsApp"
     : /FxiOS|Firefox/.test(ua) ? "Firefox" : /CriOS|Chrome/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "";
-  return { device, os, browser };
+  return { device, os, osVersion, model, browser };
 }
 
 const shareIp = (req) => req.headers.get("CF-Connecting-IP") || "local";
