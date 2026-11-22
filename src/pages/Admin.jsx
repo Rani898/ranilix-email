@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
+  Activity,
+  ArrowUpRight,
+  AtSign,
+  Bell,
+  Sparkles,
   Palette,
   ExternalLink,
   ImagePlus,
@@ -19,6 +24,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   Loader2,
+  LogOut,
   Mail,
   Mails,
   Megaphone,
@@ -108,7 +114,7 @@ function LookTab({ toast }) {
         <span className="rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white">{t("admin.look.roomOpen")}</span>
       </Link>
 
-      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+      <section className="adm-glass rounded-3xl p-5">
         <h2 className="font-bold text-slate-900">{t("admin.look.pickTitle")}</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {LOOKS.map((l) => {
@@ -131,7 +137,7 @@ function LookTab({ toast }) {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+      <section className="adm-glass rounded-3xl p-5">
         <h2 className="font-bold text-slate-900">{t("admin.look.nameTitle")}</h2>
         <p className="mt-1 text-sm text-slate-500">{t("admin.look.nameHint")}</p>
         <form className="mt-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); run("name", () => saveSkin({ nickname }), t("admin.look.saved")); }}>
@@ -141,7 +147,7 @@ function LookTab({ toast }) {
         </form>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+      <section className="adm-glass rounded-3xl p-5">
         <h2 className="font-bold text-slate-900">{t("admin.look.bgTitle")}</h2>
         <p className="mt-1 text-sm text-slate-500">{t("admin.look.bgHint")}</p>
         <div className="mt-4 grid aspect-[16/7] place-items-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 bg-cover bg-center"
@@ -155,7 +161,7 @@ function LookTab({ toast }) {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-surface p-5">
+      <section className="adm-glass rounded-3xl p-5">
         <h2 className="font-bold text-slate-900">{t("admin.look.stickerTitle")}</h2>
         <p className="mt-1 text-sm text-slate-500">{t("admin.look.stickerHint")}</p>
         <div className="mt-4 flex flex-wrap items-center gap-4">
@@ -170,7 +176,7 @@ function LookTab({ toast }) {
         </div>
       </section>
 
-      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-surface p-5">
+      <section className="flex flex-wrap items-center justify-between gap-3 adm-glass rounded-3xl p-5">
         <div>
           <h2 className="font-bold text-slate-900">{t("admin.look.resetTitle")}</h2>
           <p className="mt-1 text-sm text-slate-500">{t("admin.look.resetHint")}</p>
@@ -219,14 +225,14 @@ function randomPassword() {
 }
 
 function Card({ children, className = "" }) {
-  return <section className={`rounded-2xl border border-slate-200 bg-surface ${className}`}>{children}</section>;
+  return <section className={`adm-glass rounded-3xl ${className}`}>{children}</section>;
 }
 
 function PageHeader({ title, subtitle, children }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">{title}</h1>
+        <h1 className="text-3xl font-extrabold tracking-[-0.02em] text-slate-900 sm:text-4xl">{title}</h1>
         {subtitle && <p className="mt-1 text-slate-600">{subtitle}</p>}
       </div>
       {children}
@@ -240,16 +246,74 @@ function Spinner() {
 
 /* ---------- Overview ---------- */
 
-function StatTile({ icon: Icon, label, value, note }) {
+/** Smooth path through points (cubic, horizontal tangents). */
+function smoothPath(pts) {
+  return pts.reduce((d, [x, y], i) => {
+    if (!i) return `M${x},${y}`;
+    const [px, py] = pts[i - 1];
+    const cx = (px + x) / 2;
+    return `${d} C${cx},${py} ${cx},${y} ${x},${y}`;
+  }, "");
+}
+
+function Sparkline({ data }) {
+  const w = 120, h = 46, pad = 3;
+  const max = Math.max(1, ...data), min = Math.min(...data);
+  const pts = data.map((v, i) => [pad + (i * (w - 2 * pad)) / Math.max(1, data.length - 1), h - pad - ((v - min) / ((max - min) || 1)) * (h - 2 * pad)]);
+  const line = smoothPath(pts);
   return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium text-slate-600">{label}</p>
-        <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-50 text-brand-600"><Icon className="h-4 w-4" aria-hidden="true" /></span>
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-12 w-28 overflow-visible text-[var(--color-chart)]" aria-hidden="true">
+      <defs><linearGradient id="adm-spark" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="currentColor" stopOpacity=".35" /><stop offset="1" stopColor="currentColor" stopOpacity="0" /></linearGradient></defs>
+      <path d={`${line} L${w - pad},${h} L${pad},${h} Z`} fill="url(#adm-spark)" />
+      <path d={line} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function MiniBars({ data }) {
+  const max = Math.max(1, ...data);
+  return (
+    <div className="flex h-12 w-28 items-end gap-1.5" aria-hidden="true">
+      {data.map((v, i) => (
+        <span key={i} className="flex-1 rounded-full" style={{ height: `${Math.max(8, (v / max) * 100)}%`, background: "var(--color-chart)", opacity: 0.35 + (0.65 * i) / Math.max(1, data.length - 1) }} />
+      ))}
+    </div>
+  );
+}
+
+function Ring({ pct }) {
+  const r = 20, c = 2 * Math.PI * r;
+  return (
+    <svg viewBox="0 0 50 50" className="h-14 w-14 -rotate-90 text-[var(--color-chart)]" aria-hidden="true">
+      <circle cx="25" cy="25" r={r} fill="none" stroke="currentColor" strokeOpacity=".14" strokeWidth="6" />
+      <circle cx="25" cy="25" r={r} fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeDasharray={`${(pct / 100) * c} ${c}`} />
+    </svg>
+  );
+}
+
+function KpiCard({ icon: Icon, label, value, chart, note }) {
+  return (
+    <Card className="adm-lift p-5">
+      <p className="flex items-center gap-2.5 text-sm font-semibold text-slate-600">
+        <span className="grid h-8 w-8 place-items-center rounded-xl bg-slate-100 text-slate-600"><Icon className="h-4 w-4" aria-hidden="true" /></span>
+        {label}
+      </p>
+      <div className="mt-4 mb-2 flex items-end justify-between gap-3">
+        <p className="text-4xl font-bold tabular-nums tracking-tight text-slate-900"><bdi dir="ltr">{value}</bdi></p>
+        <div dir="ltr">{chart}</div>
       </div>
-      <p className="mt-3 text-3xl font-extrabold tabular-nums tracking-tight text-slate-900"><bdi dir="ltr">{value}</bdi></p>
-      {note && <p className="mt-1 text-xs font-medium text-slate-500">{note}</p>}
+      <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">{note}</p>
     </Card>
+  );
+}
+
+function Growth({ pct }) {
+  if (pct === null) return null;
+  const up = pct >= 0;
+  return (
+    <b className={`inline-flex items-center gap-0.5 font-bold ${up ? "text-emerald-600" : "text-rose-600"}`}>
+      <ArrowUpRight className={`h-3.5 w-3.5 ${up ? "" : "rotate-90"}`} aria-hidden="true" /><bdi dir="ltr">{up ? "+" : ""}{pct}%</bdi>
+    </b>
   );
 }
 
@@ -258,112 +322,248 @@ function SignupChart({ data }) {
   const f = useFormatters();
   const [hover, setHover] = useState(null);
   const max = Math.max(4, ...data.map((d) => d.count));
-  const top = Math.ceil(max / 4) * 4; // a round top value so gridlines land on whole numbers
+  const top = Math.ceil(max / 4) * 4;
   const total = data.reduce((n, d) => n + d.count, 0);
+  const n = data.length;
+  const x = (i) => (n > 1 ? (i / (n - 1)) * 100 : 50);
+  const y = (v) => 100 - (v / top) * 92;
+  const pts = data.map((d, i) => [x(i), y(d.count)]);
+  const line = smoothPath(pts);
 
   return (
-    <Card className="p-5 lg:col-span-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-bold text-slate-900">{t("admin.overview.chartTitle")}</h2>
-        <p className="text-sm tabular-nums text-slate-500">{t("admin.overview.chartTotal", { n: f.num(total) })}</p>
+    <Card className="p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-bold text-slate-900">{t("admin.overview.chartTitle")}</h2>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold tabular-nums text-slate-600">{t("admin.overview.chartTotal", { n: f.num(total) })}</span>
       </div>
-
-      <div className="relative mt-6 h-56" dir="ltr">
-        {/* gridlines + values */}
+      <div className="relative mt-6 h-56 ps-8 pb-7" dir="ltr">
         {[0, 0.5, 1].map((p) => (
-          <div key={p} className="absolute inset-x-0 flex items-center gap-2" style={{ bottom: `calc((100% - 1.75rem) * ${p * 0.86} + 1.75rem)`, transform: "translateY(50%)" }}>
+          <div key={p} className="absolute inset-x-0 flex items-center gap-2" style={{ top: `calc((100% - 1.75rem) * ${(100 - p * 92) / 100})`, transform: "translateY(-50%)" }}>
             <span className="w-6 text-end text-[11px] tabular-nums text-slate-500">{f.num(Math.round(top * p))}</span>
-            <span className="h-px flex-1 bg-slate-200" />
+            <span className="h-px flex-1 border-t border-dashed border-slate-200" />
           </div>
         ))}
-        {/* bars */}
-        <div className="absolute inset-0 flex items-end gap-1.5 ps-8 pb-7 sm:gap-2" aria-hidden="true">
+        <div className="relative h-full">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible text-[var(--color-chart)]" aria-hidden="true">
+            <defs><linearGradient id="adm-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#8b6cf6" stopOpacity=".35" /><stop offset="1" stopColor="#8b6cf6" stopOpacity="0" /></linearGradient></defs>
+            <path d={`${line} L100,100 L0,100 Z`} fill="url(#adm-area)" />
+            <path d={line} fill="none" stroke="currentColor" strokeWidth="2.4" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+          </svg>
           {data.map((d, i) => (
-            <div
-              key={d.day}
-              className="relative flex h-full flex-1 cursor-default items-end justify-center"
-              onMouseEnter={() => setHover(i)}
-              onMouseLeave={() => setHover(null)}
-            >
-              <div
-                className={`w-full max-w-7 rounded-t-[4px] transition-opacity ${hover !== null && hover !== i ? "opacity-40" : ""}`}
-                style={{ height: `${(d.count / top) * 86}%`, minHeight: d.count ? 3 : 0, background: "var(--color-chart)" }}
-              />
+            <div key={d.day} className="absolute top-0 bottom-0 -translate-x-1/2" style={{ left: `${x(i)}%`, width: `${100 / n}%` }}
+              onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+              <span className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[2.5px] border-[var(--color-chart)] bg-surface transition-all ${hover === i || i === n - 1 ? "h-3.5 w-3.5" : i % 2 ? "h-2.5 w-2.5" : "h-0 w-0 border-0"}`} style={{ top: `${y(d.count)}%` }} />
               {hover === i && (
-                <div className={`pointer-events-none absolute top-0 z-10 whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-center text-xs text-white shadow-lg ${i > data.length - 3 ? "end-0" : i < 2 ? "start-0" : ""}`}>
+                <div className={`pointer-events-none absolute z-10 -translate-y-full whitespace-nowrap rounded-xl bg-ink px-2.5 py-1.5 text-center text-xs text-white shadow-lg ${i > n - 3 ? "end-1/2" : i < 2 ? "start-1/2" : "left-1/2 -translate-x-1/2"}`} style={{ top: `calc(${y(d.count)}% - 10px)` }}>
                   <span className="block font-semibold tabular-nums">{t("admin.overview.chartTooltip", { n: f.num(d.count) })}</span>
                   <span className="block text-white/70">{f.date(d.day)}</span>
                 </div>
               )}
-              <span className={`absolute -bottom-6 text-[11px] tabular-nums text-slate-500 ${i % 2 ? "max-sm:hidden" : ""}`}>{f.dayLabel(d.day)}</span>
+              <span className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[11px] tabular-nums text-slate-500 ${i % 2 ? "hidden" : i % 4 ? "max-sm:hidden" : ""}`}>{f.dayLabel(d.day)}</span>
             </div>
           ))}
         </div>
       </div>
-
-      {/* Same data as a table for screen readers */}
-      <table className="sr-only">
-        <caption>{t("admin.overview.chartTitle")}</caption>
-        <thead><tr><th>{t("admin.overview.day")}</th><th>{t("admin.overview.count")}</th></tr></thead>
-        <tbody>{data.map((d) => <tr key={d.day}><td>{f.date(d.day)}</td><td>{d.count}</td></tr>)}</tbody>
-      </table>
+      <div className="sr-only">
+        <table>
+          <caption>{t("admin.overview.chartTitle")}</caption>
+          <thead><tr><th>{t("admin.overview.day")}</th><th>{t("admin.overview.count")}</th></tr></thead>
+          <tbody>{data.map((d) => <tr key={d.day}><td>{f.date(d.day)}</td><td>{d.count}</td></tr>)}</tbody>
+        </table>
+      </div>
     </Card>
   );
 }
 
-function Overview({ go }) {
+function DriveGauge({ stats }) {
+  const { t } = useI18n();
+  const cap = stats.driveCapacity || 0;
+  const pct = cap ? Math.min(100, Math.round((stats.driveUsed / cap) * 100)) : 0;
+  const ticks = 46, cx = 130, cy = 124, r1 = 80, r2 = 102;
+  return (
+    <Card className="flex flex-col p-5 sm:p-6">
+      <h2 className="text-base font-bold text-slate-900">{t("admin.v2.drive")}</h2>
+      <div className="relative mx-auto mt-2 h-52 w-full max-w-64" dir="ltr">
+        <svg viewBox="0 0 260 220" className="h-full w-full text-[var(--color-chart)]" aria-hidden="true">
+          {Array.from({ length: ticks }, (_, i) => {
+            const p = i / (ticks - 1), a = ((-225 + p * 270) * Math.PI) / 180, on = p * 100 <= pct && pct > 0;
+            const ri = on ? r1 - 2 : r1 + 6;
+            return <line key={i} x1={cx + ri * Math.cos(a)} y1={cy + ri * Math.sin(a)} x2={cx + r2 * Math.cos(a)} y2={cy + r2 * Math.sin(a)}
+              stroke="currentColor" strokeOpacity={on ? 0.5 + (0.5 * p * 100) / Math.max(1, pct) : 0.12} strokeWidth={on ? 5 : 4} strokeLinecap="round" />;
+          })}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pt-6">
+          <p className="text-5xl font-bold tabular-nums tracking-tight text-slate-900">{pct}%</p>
+          <p className="mt-1 text-xs text-slate-500">{t("admin.v2.driveOf", { used: <bdi dir="ltr">{formatBytes(stats.driveUsed || 0)}</bdi>, cap: <bdi dir="ltr">{formatBytes(cap)}</bdi> })}</p>
+        </div>
+      </div>
+      <div className="mt-auto flex flex-wrap justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500">
+        <span>{t("admin.v2.attachments")} <b className="font-bold text-slate-900"><bdi dir="ltr">{formatBytes(stats.storageBytes || 0)}</bdi></b></span>
+        <span>{t("admin.v2.storageOn")} <b className="font-bold text-slate-900">{stats.driveBackend === "r2" ? "Cloudflare R2" : "Cloudflare KV"}</b></span>
+      </div>
+    </Card>
+  );
+}
+
+function MonitorTile({ icon: Icon, label, value, extra, tone, bar }) {
+  return (
+    <div className="rounded-2xl bg-white/6 px-3.5 py-3">
+      <p className="flex items-center gap-1.5 text-xs text-white/60"><Icon className="h-3.5 w-3.5" style={{ color: tone }} aria-hidden="true" />{label}</p>
+      <p className="mt-1 text-3xl font-bold tabular-nums tracking-tight" style={{ color: tone }}><bdi dir="ltr">{value}{extra && <small className="text-sm font-semibold text-white/45"> / {extra}</small>}</bdi></p>
+      {bar !== undefined && <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10"><i className="block h-full rounded-full" style={{ width: `${bar}%`, background: tone }} /></div>}
+    </div>
+  );
+}
+
+function LiveMonitor({ stats, ai, go }) {
+  const { t } = useI18n();
+  const f = useFormatters();
+  const outPct = stats.outboundLimit ? Math.min(100, Math.round((stats.outboundToday / stats.outboundLimit) * 100)) : 0;
+  return (
+    <section className="adm-monitor rounded-[26px] p-5 text-white">
+      <p className="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#ff8aa3]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#ff4f78]" />{t("admin.v2.live")}</p>
+      <div className="mt-1.5 mb-4 flex items-center justify-between gap-2">
+        <h2 className="text-xl font-bold">{t("admin.v2.monitor")}</h2>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${stats.signupsOpen ? "bg-emerald-400/15 text-emerald-300" : "bg-amber-400/15 text-amber-300"}`}>
+          {stats.signupsOpen ? t("admin.overview.signupsOpen") : t("admin.overview.signupsClosed")}
+        </span>
+      </div>
+      <div className="mb-3 flex items-center gap-3 rounded-2xl bg-white/6 px-3 py-2.5">
+        <span className="grid h-9 w-9 place-items-center rounded-full bg-white/12"><AtSign className="h-4 w-4" aria-hidden="true" /></span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold" dir="ltr">api.{BRAND.domain}</p>
+          <p className="truncate text-[11px] text-white/55" dir="ltr">Cloudflare Worker · D1 · {stats.driveBackend === "r2" ? "R2" : "KV"}</p>
+        </div>
+        <span className="ms-auto inline-flex items-center gap-1.5 rounded-full bg-emerald-400/15 px-2.5 py-1 text-[11px] font-bold text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />{t("admin.v2.serverOk")}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2.5">
+        <MonitorTile icon={Mail} label={t("admin.v2.inToday")} value={f.num(stats.receivedToday)} tone="#3ee0b0" />
+        <MonitorTile icon={Send} label={t("admin.v2.outToday")} value={f.num(stats.outboundToday || 0)} extra={f.num(stats.outboundLimit || 0)} tone="#5fb4ff" bar={outPct} />
+        <MonitorTile icon={LifeBuoy} label={t("admin.v2.openChats")} value={f.num(stats.supportOpen || 0)} tone="#c2b3ff" />
+        <MonitorTile icon={Flag} label={t("admin.v2.openReports")} value={f.num(stats.openReports || 0)} tone="#f6b544" />
+      </div>
+      <div className="mt-3 mb-3 flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-white/55">
+        <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{ai ? t("admin.v2.aiOn") : t("admin.v2.aiOff")}</span>
+        <span>{t("admin.v2.totalMail", { n: f.num(stats.messages || 0) })}</span>
+      </div>
+      <button type="button" onClick={() => go("broadcast")}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
+        <Megaphone className="h-4 w-4" aria-hidden="true" /> {t("admin.v2.sendAll")}
+      </button>
+    </section>
+  );
+}
+
+const QUEUE_AVATAR = ["bg-orange-100 text-orange-700", "bg-brand-50 text-brand-700", "bg-emerald-50 text-emerald-700", "bg-violet-50 text-violet-700"];
+
+function SupportQueue({ threads, go }) {
+  const { t } = useI18n();
+  const waiting = threads.filter((th) => th.unread > 0 || th.escalated).length;
+  const chip = (th) => th.escalated ? ["bg-amber-50 text-amber-800", t("admin.v2.handed")]
+    : th.lastFrom === "ai" ? ["bg-violet-50 text-violet-700", t("admin.v2.aiHandled")]
+      : th.unread > 0 ? ["bg-slate-100 text-slate-700", t("admin.v2.waiting")] : ["bg-emerald-50 text-emerald-700", t("admin.v2.open")];
+  return (
+    <Card className="p-5">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-bold text-slate-900">{t("admin.v2.queue")}</h2>
+          {waiting > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-amber-800">{t("admin.v2.waitingN", { n: waiting })}</span>}
+        </div>
+        <button type="button" onClick={() => go("support")} className="rounded-lg px-2 py-1 text-sm font-semibold text-brand-700 hover:bg-brand-50">{t("admin.v2.viewAll")}</button>
+      </div>
+      {threads.length === 0 ? (
+        <p className="py-6 text-center text-sm text-slate-500">{t("admin.v2.noChats")}</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {threads.slice(0, 4).map((th, i) => {
+            const [tone, label] = chip(th);
+            const who = th.name || th.email || t("admin.support.guest");
+            return (
+              <li key={th.id}>
+                <button type="button" onClick={() => go("support")} className="flex w-full items-center gap-3 rounded-xl py-2.5 text-start hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300">
+                  <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold ${QUEUE_AVATAR[i % 4]}`}>{th.name || th.email ? who[0].toUpperCase() : <Users className="h-4 w-4" />}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-900"><bdi>{who}</bdi></span>
+                    <span dir="auto" className="block truncate text-xs text-slate-500">{th.lastPreview}</span>
+                  </span>
+                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${tone}`}>{label}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function Overview({ go, name }) {
   const { t } = useI18n();
   const f = useFormatters();
   const errorText = useErrorText();
   const [stats, setStats] = useState(null);
-  const [recent, setRecent] = useState([]);
+  const [support, setSupport] = useState({ threads: [], ai: false });
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([adminApi.stats(), adminApi.broadcasts()])
-      .then(([s, b]) => { setStats(s); setRecent(b.broadcasts.slice(0, 3)); })
-      .catch((e) => setError(errorText(e)));
+    adminApi.stats().then(setStats).catch((e) => setError(errorText(e)));
+    adminApi.support("open").then((s) => setSupport({ threads: s.threads || [], ai: !!(s.ai && s.aiReady) })).catch(() => {});
   }, [errorText]);
 
   if (error) return <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>;
   if (!stats) return <Spinner />;
 
+  const daily = stats.signups.map((d) => d.count);
+  const last7 = daily.slice(-7), prev7 = daily.slice(-14, -7);
+  const sum = (a) => a.reduce((n, v) => n + v, 0);
+  const growth = sum(prev7) ? Math.round(((sum(last7) - sum(prev7)) / sum(prev7)) * 100) : null;
+  const activePct = stats.users ? Math.round((stats.activeWeek / stats.users) * 100) : 0;
+  const hour = new Date().getHours();
+  const greet = t(hour < 5 ? "admin.v2.greetNight" : hour < 12 ? "admin.v2.greetMorning" : hour < 17 ? "admin.v2.greetNoon" : hour < 22 ? "admin.v2.greetEvening" : "admin.v2.greetNight");
+  const waiting = stats.supportUnread || 0;
+
   return (
-    <div className="space-y-6">
-      <PageHeader title={t("admin.overview.title")} subtitle={t("admin.overview.subtitle")} />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile icon={Users} label={t("admin.overview.users")} value={f.num(stats.users)} note={t("admin.overview.newToday", { n: f.num(stats.newToday) })} />
-        <StatTile icon={UserPlus} label={t("admin.overview.newWeek")} value={f.num(stats.newWeek)} note={`${t("admin.overview.activeWeek")}: ${f.num(stats.activeWeek)}`} />
-        <StatTile icon={Mail} label={t("admin.overview.receivedToday")} value={f.num(stats.receivedToday)} />
-        <StatTile icon={HardDrive} label={t("admin.overview.storage")} value={formatBytes(stats.storageBytes)} note={t("admin.overview.filesCount", { n: f.num(stats.files) })} />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <SignupChart data={stats.signups} />
-        <Card className="flex flex-col p-5">
-          <p className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${stats.signupsOpen ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
-            <span className={`h-2 w-2 rounded-full ${stats.signupsOpen ? "bg-emerald-500" : "bg-amber-500"}`} />
-            {stats.signupsOpen ? t("admin.overview.signupsOpen") : t("admin.overview.signupsClosed")}
-          </p>
-          <div className="mt-4 grid gap-2">
-            <Button onClick={() => go("broadcast")}><Megaphone className="h-4 w-4" /> {t("admin.overview.quickBroadcast")}</Button>
-            <Button variant="ghost" onClick={() => go("reports")}><Flag className="h-4 w-4" /> {t("admin.reports.quick", { n: f.num(stats.openReports || 0) })}</Button>
-            <Button variant="ghost" onClick={() => go("settings")}><Settings className="h-4 w-4" /> {t("admin.overview.quickSettings")}</Button>
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_23rem]">
+      <div className="min-w-0 space-y-5">
+        <div>
+          <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+            <span className="adm-glass inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold text-slate-800">
+              <span className={`h-2 w-2 rounded-full ${waiting ? "bg-[var(--color-chart)]" : "bg-emerald-500"}`} />
+              {waiting ? t("admin.v2.statusWaiting", { n: f.num(waiting) }) : t("admin.v2.statusCalm")}
+            </span>
+            <span className="text-slate-500 max-sm:hidden">{t("admin.v2.todayLine", { greet, name: BRAND.short })}</span>
           </div>
-          <h3 className="mt-6 text-sm font-semibold text-slate-700">{t("admin.overview.recent")}</h3>
-          {recent.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">{t("admin.overview.noBroadcasts")}</p>
-          ) : (
-            <ul className="mt-2 divide-y divide-slate-100">
-              {recent.map((b) => (
-                <li key={b.id} className="py-2.5">
-                  <p dir="auto" className="truncate text-sm font-medium text-slate-800">{b.subject}</p>
-                  <p className="text-xs text-slate-500">{f.relative(b.createdAt)} · {t("admin.broadcast.recipients", { n: f.num(b.recipients) })}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+          <div className="flex flex-wrap items-end justify-between gap-5">
+            <h1 className="text-5xl font-extrabold leading-[0.98] tracking-[-0.025em] text-slate-900 sm:text-6xl">
+              {t("admin.v2.welcome")}
+              <span className="adm-serif block pb-1 text-[1.08em] leading-[1.08]">{name}</span>
+            </h1>
+            <div className="flex flex-wrap gap-2.5">
+              <button type="button" onClick={() => go("broadcast")} className="adm-glass inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-slate-800 hover:text-brand-700"><Megaphone className="h-4 w-4" aria-hidden="true" />{t("admin.v2.broadcast")}</button>
+              <button type="button" onClick={() => go("settings")} className="adm-glass inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-slate-800 hover:text-brand-700"><Settings className="h-4 w-4" aria-hidden="true" />{t("admin.v2.settings")}</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <KpiCard icon={Users} label={t("admin.v2.kUsers")} value={f.num(stats.users)} chart={<Sparkline data={daily} />}
+            note={<><Growth pct={growth} /> {growth !== null && t("admin.v2.vsLastWeek")}{growth === null && t("admin.v2.newToday", { n: f.num(stats.newToday) })}</>} />
+          <KpiCard icon={UserPlus} label={t("admin.v2.kNewWeek")} value={f.num(stats.newWeek)} chart={<MiniBars data={last7} />}
+            note={t("admin.v2.newToday", { n: f.num(stats.newToday) })} />
+          <KpiCard icon={Activity} label={t("admin.v2.kActive")} value={f.num(stats.activeWeek)} chart={<Ring pct={activePct} />}
+            note={<><b className="font-bold text-slate-800">{activePct}%</b> {t("admin.v2.ofAll")}</>} />
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+          <SignupChart data={stats.signups} />
+          <DriveGauge stats={stats} />
+        </div>
       </div>
+
+      <aside className="min-w-0 space-y-5">
+        <LiveMonitor stats={stats} ai={support.ai} go={go} />
+        <SupportQueue threads={support.threads} go={go} />
+      </aside>
     </div>
   );
 }
@@ -1309,11 +1509,12 @@ function NotAllowed() {
 }
 
 export default function Admin() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const session = getSession();
+  const [name, setName] = useState(() => (session?.email || "").split("@")[0]);
+  const [now, setNow] = useState(() => Date.now());
   const [allowed, setAllowed] = useState(null); // null = checking
   const [tab, setTab] = useState(() => (TABS.some((x) => `#${x.id}` === window.location.hash) ? window.location.hash.slice(1) : "overview"));
-  const [menuOpen, setMenuOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [openReports, setOpenReports] = useState(0);
   const [supportUnread, setSupportUnread] = useState(0);
@@ -1323,6 +1524,7 @@ export default function Admin() {
     if (!session) return;
     getMe().then((me) => {
       if (me.skin) applySkin(me.skin);
+      if (me.profile?.displayName) setName(me.profile.displayName);
       const staff = !me.isAdmin && !!me.isStaff;
       setAllowed(!!me.isAdmin || staff);
       setStaffOnly(staff);
@@ -1346,62 +1548,86 @@ export default function Admin() {
     return () => clearTimeout(timer);
   }, [toastMsg]);
 
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const toast = useCallback((m) => setToastMsg(m), []);
-  const go = (id) => { setTab(id); setMenuOpen(false); history.replaceState(null, "", `#${id}`); window.scrollTo(0, 0); };
+  const go = (id) => { setTab(id); history.replaceState(null, "", `#${id}`); window.scrollTo(0, 0); };
 
   if (!session) return <Navigate to="/login" replace />;
   if (allowed === null) return <div className="min-h-dvh bg-surface"><Spinner /></div>;
   if (!allowed) return <NotAllowed />;
 
-  const nav = (
-    <nav className="mt-8 space-y-1">
-      {TABS.filter(({ id }) => !staffOnly || STAFF_TABS.includes(id)).map(({ id, icon: Icon }) => (
-        <button key={id} type="button" onClick={() => go(id)} aria-current={tab === id ? "page" : undefined}
-          className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${tab === id ? "bg-white/12 text-white" : "text-white/65 hover:bg-white/6 hover:text-white"}`}>
-          <Icon className="h-5 w-5" aria-hidden="true" /> <span className="flex-1 text-start">{t(`admin.nav.${id}`)}</span>
-          {id === "support" && supportUnread > 0 && <span className="rounded-full bg-rose-500 px-2 py-0.5 text-xs font-bold text-white">{supportUnread}</span>}
-          {id === "reports" && openReports > 0 && <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-bold text-[#3b2800]">{openReports}</span>}
-        </button>
-      ))}
-    </nav>
-  );
+  const tabs = TABS.filter(({ id }) => !staffOnly || STAFF_TABS.includes(id));
+  const badgeFor = (id) => (id === "support" ? supportUnread : id === "reports" ? openReports : 0);
+  const alerts = supportUnread + openReports;
+  const when = new Date(now);
+  const railBtn = (on) => `group relative grid h-12 w-12 place-items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${on ? "bg-white text-[#0c1440] shadow-[0_10px_24px_-6px_rgb(255_255_255/0.45)]" : "text-white/60 hover:bg-white/10 hover:text-white"}`;
+  const tip = (label) => <span className="pointer-events-none absolute start-full ms-3 whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">{label}</span>;
+  const badge = (n, ring) => n > 0 && <span className={`absolute -top-0.5 end-0 grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 bg-rose-500 px-1 text-[10px] font-bold leading-none text-white ${ring}`}>{n > 99 ? "99+" : n}</span>;
 
   return (
-    <div className="min-h-dvh bg-slate-50 lg:flex">
-      {/* Sidebar */}
-      {menuOpen && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setMenuOpen(false)} />}
-      <aside className={`fixed inset-y-0 start-0 z-40 flex w-64 flex-col bg-ink p-5 text-white transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0 ${menuOpen ? "translate-x-0" : "max-lg:ltr:-translate-x-full max-lg:rtl:translate-x-full"}`}>
-        <div className="flex items-center justify-between">
-          <Link to="/" dir="ltr" className="flex items-center gap-2.5 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40" title={t("nav.home", { name: BRAND.name })}>
-            <LogoMark size={34} />
-            <span className="font-display text-lg font-extrabold tracking-[-0.03em]">{BRAND.short}</span>
-            <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#3b2800]">{t(staffOnly ? "admin.staffBadge" : "admin.badge")}</span>
-          </Link>
-          <button type="button" onClick={() => setMenuOpen(false)} className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 lg:hidden" aria-label={t("compose.close")}><X className="h-5 w-5" /></button>
-        </div>
-        {nav}
-        <div className="mt-auto space-y-3 border-t border-white/10 pt-4">
-          <Link to="/inbox" className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-white/70 hover:bg-white/6 hover:text-white">
-            <ArrowLeft className="h-4 w-4 rtl:rotate-180" /> {t("admin.backToInbox")}
-          </Link>
-          <p dir="ltr" className="truncate px-3 text-xs text-white/50 rtl:text-right">{session.email}</p>
-        </div>
-      </aside>
+    <div className="adm-bg min-h-dvh">
+      {/* Floating rail (computer) */}
+      <nav aria-label={t("admin.v2.navLabel")} className="adm-rail fixed inset-y-5 start-5 z-30 hidden w-[74px] flex-col items-center gap-2 rounded-[40px] py-4 lg:flex">
+        <Link to="/" dir="ltr" className="mb-5 grid h-12 w-12 place-items-center rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50" title={t("nav.home", { name: BRAND.name })}>
+          <LogoMark size={38} />
+        </Link>
+        {tabs.map(({ id, icon: Icon }) => (
+          <button key={id} type="button" onClick={() => go(id)} aria-current={tab === id ? "page" : undefined} aria-label={t(`admin.nav.${id}`)} className={railBtn(tab === id)}>
+            <Icon className="h-5 w-5" aria-hidden="true" />
+            {badge(badgeFor(id), "border-[#16225e]")}
+            {tip(t(`admin.nav.${id}`))}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <Link to="/inbox" aria-label={t("admin.backToInbox")} className={railBtn(false)}>
+          <LogOut className="h-5 w-5 rtl:rotate-180" aria-hidden="true" />
+          {tip(t("admin.backToInbox"))}
+        </Link>
+      </nav>
 
-      {/* Main */}
-      <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-surface/90 px-4 backdrop-blur sm:px-8">
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setMenuOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label={t("admin.openMenu")}><Menu className="h-5 w-5" /></button>
-            <p className="font-semibold text-slate-900">{t(staffOnly ? "admin.staffTitle" : "admin.title")}</p>
+      <div className="lg:ps-[118px]">
+        <header className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-8 sm:pt-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link to="/inbox" className="adm-glass grid h-11 w-11 shrink-0 place-items-center rounded-full text-slate-700 lg:hidden" aria-label={t("admin.backToInbox")}>
+              <ArrowLeft className="h-5 w-5 rtl:rotate-180" aria-hidden="true" />
+            </Link>
+            <div className="adm-glass flex min-w-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-800">
+              <span dir="ltr" className="font-extrabold">{BRAND.short}</span>
+              <span className="text-slate-400" aria-hidden="true">›</span>
+              <span className="truncate">{t(`admin.nav.${tab}`)}</span>
+              <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#3b2800]">{t(staffOnly ? "admin.staffBadge" : "admin.badge")}</span>
+            </div>
+            <p className="hidden items-center gap-2 text-sm text-slate-500 md:flex">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15" aria-hidden="true" />
+              {when.toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "short" })}
+              <b className="font-semibold tabular-nums text-slate-900">{when.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}</b>
+            </p>
           </div>
-          <Preferences />
+          <div className="flex items-center gap-2.5">
+            <Preferences compact />
+            <button type="button" onClick={() => go(supportUnread || staffOnly ? "support" : "reports")} className="adm-glass relative grid h-11 w-11 place-items-center rounded-full text-slate-700" aria-label={t("admin.v2.notifications", { n: alerts })}>
+              <Bell className="h-5 w-5" aria-hidden="true" />
+              {badge(alerts, "border-white")}
+            </button>
+            <div className="adm-glass flex items-center gap-2.5 rounded-full p-1.5 sm:pe-4">
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-[#4c68ff] to-[#8b6cf6] text-sm font-bold text-white" aria-hidden="true">{(name[0] || "?").toUpperCase()}</span>
+              <span className="hidden leading-tight sm:block">
+                <span className="block text-sm font-bold text-slate-900"><bdi>{name}</bdi></span>
+                <span className="block text-[11px] text-slate-500">{t(staffOnly ? "admin.v2.roleStaff" : "admin.v2.roleAdmin")}</span>
+              </span>
+            </div>
+          </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8">
+
+        <main className="mx-auto max-w-[1400px] px-4 pt-6 pb-28 sm:px-8 lg:pb-10">
           {DEMO_MODE && (
             <p className="mb-6 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-800">{t("admin.previewData")}</p>
           )}
-          {!staffOnly && tab === "overview" && <Overview go={go} />}
+          {!staffOnly && tab === "overview" && <Overview go={go} name={name} />}
           {!staffOnly && tab === "users" && <UsersTab toast={toast} />}
           {!staffOnly && tab === "broadcast" && <BroadcastTab toast={toast} />}
           {!staffOnly && tab === "settings" && <SettingsTab toast={toast} />}
@@ -1411,8 +1637,19 @@ export default function Admin() {
         </main>
       </div>
 
+      {/* Bottom bar (phone / tablet) */}
+      <nav aria-label={t("admin.v2.navLabel")} className="adm-rail fixed inset-x-3 bottom-3 z-30 flex h-16 items-center justify-around rounded-full px-2 lg:hidden">
+        {tabs.map(({ id, icon: Icon }) => (
+          <button key={id} type="button" onClick={() => go(id)} aria-current={tab === id ? "page" : undefined} aria-label={t(`admin.nav.${id}`)}
+            className={`relative grid h-11 w-11 place-items-center rounded-full transition ${tab === id ? "bg-white text-[#0c1440]" : "text-white/60"}`}>
+            <Icon className="h-5 w-5" aria-hidden="true" />
+            {badge(badgeFor(id), "border-[#16225e]")}
+          </button>
+        ))}
+      </nav>
+
       {toastMsg && (
-        <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg">{toastMsg}</div>
+        <div role="status" className="fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-ink px-5 py-3 text-sm font-medium text-white shadow-lg max-lg:bottom-24">{toastMsg}</div>
       )}
     </div>
   );

@@ -214,11 +214,11 @@ export default function SupportTab({ toast, onCount }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">{t("admin.support.title")}</h1>
+          <h1 className="text-3xl font-extrabold tracking-[-0.02em] text-slate-900 sm:text-4xl">{t("admin.support.title")}</h1>
           <p className="mt-1 text-slate-600">{t("admin.support.subtitle")}</p>
         </div>
         {data && (
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-surface px-4 py-3">
+          <div className="flex flex-col gap-3 adm-glass rounded-3xl px-4 py-3">
             <Toggle id="support-online" checked={!!data.online} onChange={setOnline} label={t("admin.support.onlineLabel")} description={t("admin.support.onlineHint")} />
             <div className="border-t border-slate-100 pt-3">
               <Toggle id="support-ai" checked={!!data.ai} onChange={setAi} label={t("admin.support.aiLabel")} description={t("admin.support.aiHint")} />
@@ -242,7 +242,7 @@ export default function SupportTab({ toast, onCount }) {
       {!data ? (
         <div className="grid place-items-center py-24 text-slate-400"><Loader2 className="h-7 w-7 animate-spin" /></div>
       ) : (
-        <section className="flex h-[calc(100dvh-17rem)] min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-surface">
+        <section className="flex h-[calc(100dvh-17rem)] min-h-[520px] overflow-hidden adm-glass rounded-3xl">
           <div className={`w-full shrink-0 overflow-y-auto border-slate-200 lg:block lg:w-80 lg:border-e ${selected ? "hidden" : ""}`}>
             {data.threads.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center p-8 text-center">

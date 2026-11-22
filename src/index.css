@@ -207,3 +207,59 @@ body {
 :root[data-skin="noya"]:not(.dark) aside.bg-surface { background: linear-gradient(180deg, #fff7fb, #ffeef6); }
 :root[data-skin="noya"]:not(.dark) ::selection { background: #ffc6db; }
 :root[data-skin="noya"]:not(.dark) aside.bg-ink { background: linear-gradient(180deg, #e46aa0, #c2477f); }
+
+/* ---------- Admin panel: soft gradient page, floating dark rail, glass cards ---------- */
+.adm-bg {
+  background-color: #eef0f8;
+  background-image:
+    radial-gradient(900px 520px at 85% -8%, #cdd6ff 0%, rgb(205 214 255 / 0) 70%),
+    radial-gradient(760px 620px at 0% 105%, #e6dcfd 0%, rgb(230 220 253 / 0) 70%);
+  background-attachment: fixed;
+}
+:root.dark .adm-bg {
+  background-color: #0b1020;
+  background-image:
+    radial-gradient(900px 520px at 85% -8%, #1c2a6b 0%, rgb(28 42 107 / 0) 70%),
+    radial-gradient(760px 620px at 0% 105%, #2a1c55 0%, rgb(42 28 85 / 0) 70%);
+}
+.adm-glass {
+  background: rgb(255 255 255 / 0.74);
+  border: 1px solid rgb(255 255 255 / 0.95);
+  box-shadow: 0 18px 40px -22px rgb(40 50 120 / 0.28), 0 2px 6px -2px rgb(40 50 120 / 0.06);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+:root.dark .adm-glass {
+  background: rgb(22 29 48 / 0.78);
+  border-color: rgb(255 255 255 / 0.07);
+  box-shadow: 0 18px 40px -22px rgb(0 0 0 / 0.6);
+}
+.adm-rail {
+  background: linear-gradient(180deg, #1a2768, #0c1440 70%);
+  box-shadow: 0 30px 60px -24px rgb(12 20 64 / 0.55), inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+.adm-monitor {
+  background: linear-gradient(170deg, #1d2b74 0%, #0e1749 55%, #0b1238 100%);
+  box-shadow: 0 30px 60px -26px rgb(12 20 64 / 0.7), inset 0 1px 0 rgb(255 255 255 / 0.1);
+}
+.adm-serif {
+  font-family: "Instrument Serif", "Frank Ruhl Libre", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+  background: linear-gradient(90deg, #2547ea, #7a6cf6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:root.dark .adm-serif { background-image: linear-gradient(90deg, #8ea2ff, #c2b3ff); }
+.adm-lift { transition: transform 0.25s ease, box-shadow 0.25s ease; }
+.adm-lift:hover { transform: translateY(-4px); }
+@media (prefers-reduced-motion: reduce) { .adm-lift:hover { transform: none; } }
+:root[data-skin="noya"] .adm-rail { background: linear-gradient(180deg, #e46aa0, #b23a72); }
+:root[data-skin="noya"] .adm-monitor { background: linear-gradient(170deg, #c2477f 0%, #8a2457 60%, #6a1a43 100%); }
+:root[data-skin="noya"] .adm-serif { background-image: linear-gradient(90deg, #db2f74, #f08bb4); }
+:root[data-skin="noya"]:not(.dark) .adm-bg {
+  background-color: #fff3f8;
+  background-image: radial-gradient(900px 520px at 85% -8%, #ffd3e5 0%, rgb(255 211 229 / 0) 70%), radial-gradient(760px 620px at 0% 105%, #f3dcff 0%, rgb(243 220 255 / 0) 70%);
+}
