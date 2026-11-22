@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { API_URL, BRAND, DEMO_MODE } from "../config.js";
 import Preferences from "../components/Preferences.jsx";
+import UploadCourt from "../components/UploadCourt.jsx";
 import { Button, Modal, Toggle } from "../components/ui.jsx";
 import { endSession, getSession, useSessionVersion } from "../lib/session.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
@@ -524,10 +525,11 @@ function Drive({ email }) {
 
   const openFolder = (id) => { setFilter(""); setParams(id ? { folder: id } : {}); };
 
-  const uploadFiles = async (files) => {
+  const uploadFiles = async (files, onQueued) => {
     const list = [...files];
     if (!list.length) return;
     const queued = list.map((f) => ({ key: `${Date.now()}-${Math.random()}`, name: f.name, size: f.size, progress: 0, error: "", done: false, started: false, speed: 0, eta: null, file: f }));
+    onQueued?.(queued.map((q) => q.key));
     setUploads((u) => [...u.filter((x) => !x.done || x.error), ...queued]);
     for (const q of queued) {
       // Speed = bytes sent over the last few seconds; updates the panel about 4 times a second.
@@ -558,6 +560,18 @@ function Drive({ email }) {
     load();
     setTimeout(() => setUploads((u) => u.filter((x) => x.error)), 2500);
   };
+
+  // New files go to the "basketball" upload window (or straight up when motion is turned down).
+  const [court, setCourt] = useState(null);
+  const courtOpen = useRef(false);
+  courtOpen.current = !!court;
+  const openUpload = (files) => {
+    const list = [...(files || [])];
+    if (!list.length) return;
+    const calm = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (calm) uploadFiles(list); else setCourt({ files: list, id: Date.now() });
+  };
+  const shootUpload = (file) => { let key = null; uploadFiles([file], (keys) => { key = keys[0]; }); return key; };
 
   const download = async (item) => {
     try {
@@ -626,7 +640,7 @@ function Drive({ email }) {
     onDragEnter: (e) => { if (![...(e.dataTransfer?.types || [])].includes("Files")) return; e.preventDefault(); dragDepth.current++; setDragging(true); },
     onDragOver: (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault(); },
     onDragLeave: () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); },
-    onDrop: (e) => { e.preventDefault(); dragDepth.current = 0; setDragging(false); uploadFiles(e.dataTransfer.files); },
+    onDrop: (e) => { e.preventDefault(); dragDepth.current = 0; setDragging(false); if (!courtOpen.current) openUpload(e.dataTransfer.files); },
   };
 
   return (
@@ -650,7 +664,7 @@ function Drive({ email }) {
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={() => setDialog({ kind: "folder" })} disabled={!data}><FolderPlus className="h-4 w-4" /> {t("drive.newFolder")}</Button>
             <Button onClick={() => fileInput.current?.click()} disabled={!data}><CloudUpload className="h-4 w-4" /> {t("drive.upload")}</Button>
-            <input ref={fileInput} type="file" multiple hidden onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
+            <input ref={fileInput} type="file" multiple hidden onChange={(e) => { openUpload(e.target.files); e.target.value = ""; }} />
           </div>
         </div>
 
@@ -767,7 +781,12 @@ function Drive({ email }) {
         {data && <p className="text-center text-xs text-slate-500">{t("drive.dragHint", { max: formatBytes(data.maxFile) })}</p>}
       </main>
 
-      {uploads.length > 0 && (
+      {court && (
+        <UploadCourt key={court.id} files={court.files} uploads={uploads} onShoot={shootUpload}
+          onUploadAll={(files) => uploadFiles(files)} onClose={() => setCourt(null)} />
+      )}
+
+      {uploads.length > 0 && !court && (
         <div className="fixed bottom-5 left-5 z-40 w-[min(24rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-surface shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
             <p className="text-sm font-bold text-slate-900">{t("drive.uploads", { done: uploads.filter((u) => u.done && !u.error).length, n: uploads.length })}</p>

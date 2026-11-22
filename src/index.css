@@ -263,3 +263,10 @@ body {
   background-color: #fff3f8;
   background-image: radial-gradient(900px 520px at 85% -8%, #ffd3e5 0%, rgb(255 211 229 / 0) 70%), radial-gradient(760px 620px at 0% 105%, #f3dcff 0%, rgb(243 220 255 / 0) 70%);
 }
+
+/* Basketball upload (Drive) */
+@keyframes court-idle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes court-net { 0% { transform: scaleY(1); } 35% { transform: scaleY(1.28) scaleX(0.9); } 70% { transform: scaleY(0.94); } 100% { transform: scaleY(1); } }
+@keyframes court-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes court-bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { [style*="court-idle"] { animation: none !important; } }
