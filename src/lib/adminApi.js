@@ -36,6 +36,10 @@ const live = {
   sendBroadcast: (subject, body, test) => request("/api/admin/broadcasts", { method: "POST", body: { subject, body, test }, auth: true }),
   settings: () => request("/api/admin/settings", { auth: true }),
   saveSettings: (patch) => request("/api/admin/settings", { method: "PUT", body: patch, auth: true }),
+  advisor: () => request("/api/ai/advisor", { auth: true }),
+  advisorSend: (text) => request("/api/ai/advisor", { method: "POST", body: { text }, auth: true }),
+  advisorClear: () => request("/api/ai/advisor", { method: "DELETE", auth: true }),
+  advisorSnapshot: () => request("/api/ai/advisor/snapshot", { auth: true }),
 };
 
 /* ---------------- Demo (sample data) ---------------- */
@@ -106,7 +110,7 @@ const demo = {
       recipients: s.users.filter((u) => !u.suspended).length,
       newToday: s.users.filter((u) => u.createdAt > now - DAY).length,
       newWeek: s.users.filter((u) => u.createdAt > now - 7 * DAY).length,
-      activeWeek: s.users.filter((u) => u.lastLoginAt && u.lastLoginAt > now - 7 * DAY).length,
+      activeWeek: s.users.filter((u) => (u.lastActiveAt || u.lastLoginAt) > now - 7 * DAY).length,
       messages: s.users.reduce((n, u) => n + u.messages, 0),
       receivedToday: 14,
       storageBytes: s.users.reduce((n, u) => n + u.storageBytes, 0),
@@ -205,5 +209,23 @@ const demo = {
     return { tempMode: "chosen", ...s.settings };
   },
 };
+
+/* Advisor room (demo): kept in this browser, with a canned answer. */
+const ADV = "ranilix.demo.advisor";
+const advLoad = () => { try { return JSON.parse(localStorage.getItem(ADV)) || []; } catch { return []; } };
+const advSave = (m) => { try { localStorage.setItem(ADV, JSON.stringify(m)); } catch { /* ignore */ } };
+Object.assign(demo, {
+  advisor: async () => ({ ready: true, messages: advLoad() }),
+  advisorClear: async () => { advSave([]); return { ok: true }; },
+  advisorSnapshot: async () => ({ snapshot: "Registered users: 13\nNew sign-ups: last 7 days 6\nActive users: last 7 days 9 = 69% of all" }),
+  async advisorSend(text) {
+    await new Promise((r) => setTimeout(r, 900));
+    const m = advLoad(), now = Date.now();
+    m.push({ id: String(now), role: "user", text, at: now });
+    const reply = { id: String(now + 1), role: "model", at: now + 1, text: "(תצוגה) באתר האמיתי היועץ עונה בעזרת Workers AI ורואה את המספרים החיים של האתר.\n\n1. **מה חלש:** …\n2. **מה לעשות השבוע:** …" };
+    m.push(reply); advSave(m);
+    return { message: reply };
+  },
+});
 
 export const adminApi = DEMO_MODE ? demo : live;

@@ -397,6 +397,15 @@ CREATE TABLE IF NOT EXISTS ai_chat (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_chat_user ON ai_chat (user_id, id);
+-- The admin's private "advisor room": a business advisor / critic chat, separate from Mochi.
+CREATE TABLE IF NOT EXISTS advisor_chat (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  role    TEXT NOT NULL,
+  text    TEXT NOT NULL,
+  at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_advisor_chat_user ON advisor_chat (user_id, id);
 
 -- Receipts found in mail (Ranilix inbox and connected Gmail), for the spending summary.
 CREATE TABLE IF NOT EXISTS receipts (

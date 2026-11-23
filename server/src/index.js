@@ -13,6 +13,7 @@ import { TEMP_PREFIX_RE, autoReplyActive, getAutoReply, maybeAutoReply, saveAuto
 import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
+import { advisorRoute } from "./advisor.js";
 import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
 import { calendarRoute } from "./calendar.js";
 import { siteOwner, sitesCleanup, sitesRoute } from "./sites.js";
@@ -404,7 +405,8 @@ async function adminRoute(req, env, admin, path, url, log) {
       one("SELECT COUNT(*) AS n FROM user_meta WHERE suspended = 1"),
       one("SELECT COUNT(*) AS n FROM users WHERE created_at > ?", now - DAY),
       one("SELECT COUNT(*) AS n FROM users WHERE created_at > ?", now - 7 * DAY),
-      one("SELECT COUNT(*) AS n FROM user_meta WHERE last_login_at > ?", now - 7 * DAY),
+      one(`SELECT COUNT(*) AS n FROM (SELECT user_id FROM user_meta WHERE last_login_at > ?
+           UNION SELECT user_id FROM device_sessions WHERE last_seen > ?)`, now - 7 * DAY, now - 7 * DAY),
       one("SELECT COUNT(*) AS n FROM messages"),
       one("SELECT COUNT(*) AS n FROM messages WHERE date > ? AND folder = 'inbox'", now - DAY),
       one("SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(DISTINCT kv_key) AS files FROM attachments"),
@@ -440,6 +442,7 @@ async function adminRoute(req, env, admin, path, url, log) {
     const { results } = await env.DB.prepare(`
       SELECT u.id, u.username, u.created_at,
              COALESCE(m.suspended, 0) AS suspended, m.last_login_at,
+             (SELECT MAX(last_seen) FROM device_sessions WHERE user_id = u.id) AS last_seen,
              COALESCE((SELECT owner_id FROM account_owners WHERE user_id = u.id), u.id) AS owner_id,
              (SELECT COUNT(*) FROM messages WHERE user_id = u.id) AS messages,
              (SELECT COALESCE(SUM(size), 0) FROM attachments WHERE user_id = u.id) AS storage
@@ -488,7 +491,7 @@ async function adminRoute(req, env, admin, path, url, log) {
       users: results.map((u) => ({
         staff: staffSet.has(u.id), tempAccess: tempSet.has(u.id), discord: discordOf.get(u.id) || null,
         drive: { used: driveUsed.get(u.id) || 0, quota: isAdmin(env, u.username) ? maxQ : Math.min(driveQuota.get(u.id) ?? defaultQuota, maxQ), custom: driveQuota.has(u.id) },
-        id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at,
+        id: String(u.id), email: `${u.username}@${env.MAIL_DOMAIN}`, createdAt: u.created_at, lastLoginAt: u.last_login_at, lastActiveAt: Math.max(u.last_login_at || 0, u.last_seen || 0) || null,
         messages: u.messages, storageBytes: u.storage, suspended: !!u.suspended, admin: isAdmin(env, u.username),
         accounts: { used: used.get(u.owner_id) || 1, max: limits.get(u.owner_id) ?? DEFAULT_ACCOUNTS },
         linked: linked.get(u.owner_id) || [],
@@ -917,6 +920,7 @@ async function route(req, env, log) {
   if (path.startsWith("/api/receipts")) return receiptsRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, htmlToText, insertMessage, notifyUser });
   if (path.startsWith("/api/events")) return calendarRoute(req, env, path, url, user, { HttpError, json, readJson });
 
+  if (path.startsWith("/api/ai/advisor")) return advisorRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
   if (path.startsWith("/api/ai/")) return aiRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
   if (path.startsWith("/api/skin")) return skinRoute(req, env, path, url, user, { HttpError, json, readJson, randomHex, admin: isAdmin(env, user.username) });
 

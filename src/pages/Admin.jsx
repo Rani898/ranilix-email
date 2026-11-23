@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   Activity,
+  Compass,
   ArrowUpRight,
   AtSign,
   Bell,
@@ -53,11 +54,13 @@ import { adminApi } from "../lib/adminApi.js";
 import { useErrorText, useI18n } from "../lib/i18n.jsx";
 import { formatBytes } from "../lib/validation.js";
 import SupportTab from "./AdminSupport.jsx";
+import AdvisorTab from "./AdminAdvisor.jsx";
 
 const DAY = 24 * 3600 * 1000;
 const STAFF_TABS = ["support", "reports"];
 const TABS = [
   { id: "overview", icon: LayoutDashboard },
+  { id: "advisor", icon: Compass },
   { id: "users", icon: Users },
   { id: "broadcast", icon: Megaphone },
   { id: "support", icon: LifeBuoy },
@@ -415,8 +418,8 @@ function MonitorTile({ icon: Icon, label, value, extra, tone, bar }) {
   );
 }
 
-function LiveMonitor({ stats, ai, go }) {
-  const { t } = useI18n();
+function LiveMonitor({ stats, ai, go, updated }) {
+  const { t, locale } = useI18n();
   const f = useFormatters();
   const outPct = stats.outboundLimit ? Math.min(100, Math.round((stats.outboundToday / stats.outboundLimit) * 100)) : 0;
   return (
@@ -444,7 +447,7 @@ function LiveMonitor({ stats, ai, go }) {
       </div>
       <div className="mt-3 mb-3 flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-white/55">
         <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{ai ? t("admin.v2.aiOn") : t("admin.v2.aiOff")}</span>
-        <span>{t("admin.v2.totalMail", { n: f.num(stats.messages || 0) })}</span>
+        <span>{t("admin.v2.totalMail", { n: f.num(stats.messages || 0) })}{updated ? ` · ${t("admin.v2.updated", { time: new Date(updated).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" }) })}` : ""}</span>
       </div>
       <button type="button" onClick={() => go("broadcast")}
         className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold transition hover:bg-white/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
@@ -503,11 +506,17 @@ function Overview({ go, name }) {
   const errorText = useErrorText();
   const [stats, setStats] = useState(null);
   const [support, setSupport] = useState({ threads: [], ai: false });
+  const [updated, setUpdated] = useState(0);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    adminApi.stats().then(setStats).catch((e) => setError(errorText(e)));
-    adminApi.support("open").then((s) => setSupport({ threads: s.threads || [], ai: !!(s.ai && s.aiReady) })).catch(() => {});
+    const load = (first) => {
+      adminApi.stats().then((s) => { setStats(s); setUpdated(Date.now()); }).catch((e) => { if (first) setError(errorText(e)); });
+      adminApi.support("open").then((s) => setSupport({ threads: s.threads || [], ai: !!(s.ai && s.aiReady) })).catch(() => {});
+    };
+    load(true);
+    const timer = setInterval(() => { if (!document.hidden) load(false); }, 30_000);
+    return () => clearInterval(timer);
   }, [errorText]);
 
   if (error) return <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>;
@@ -539,6 +548,7 @@ function Overview({ go, name }) {
               <span className="adm-serif block pb-1 text-[1.08em] leading-[1.08]">{name}</span>
             </h1>
             <div className="flex flex-wrap gap-2.5">
+              <button type="button" onClick={() => go("advisor")} className="inline-flex items-center gap-2 rounded-full bg-[var(--color-chart)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-10px_var(--color-chart)] hover:opacity-90"><Compass className="h-4 w-4" aria-hidden="true" />{t("admin.v2.askAdvisor")}</button>
               <button type="button" onClick={() => go("broadcast")} className="adm-glass inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-slate-800 hover:text-brand-700"><Megaphone className="h-4 w-4" aria-hidden="true" />{t("admin.v2.broadcast")}</button>
               <button type="button" onClick={() => go("settings")} className="adm-glass inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold text-slate-800 hover:text-brand-700"><Settings className="h-4 w-4" aria-hidden="true" />{t("admin.v2.settings")}</button>
             </div>
@@ -561,7 +571,7 @@ function Overview({ go, name }) {
       </div>
 
       <aside className="min-w-0 space-y-5">
-        <LiveMonitor stats={stats} ai={support.ai} go={go} />
+        <LiveMonitor stats={stats} ai={support.ai} go={go} updated={updated} />
         <SupportQueue threads={support.threads} go={go} />
       </aside>
     </div>
@@ -708,7 +718,14 @@ function StatusPill({ user }) {
   const { t } = useI18n();
   if (user.admin) return <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700"><ShieldCheck className="h-3.5 w-3.5" /> {t("admin.users.admin")}</span>;
   if (user.suspended) return <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700"><span className="h-1.5 w-1.5 rounded-full bg-rose-500" /> {t("admin.users.suspended")}</span>;
-  return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {t("admin.users.active")}</span>;
+  // Real activity, not just "the account exists": last sign-in or last request from any device.
+  const last = user.lastActiveAt || user.lastLoginAt || 0;
+  const age = Date.now() - last;
+  const [tone, dot, label] = !last ? ["bg-slate-100 text-slate-600", "bg-slate-400", t("admin.users.neverActive")]
+    : age < 20 * 60 * 1000 ? ["bg-emerald-50 text-emerald-700", "bg-emerald-500 animate-pulse", t("admin.users.onlineNow")]
+      : age < 7 * DAY ? ["bg-sky-50 text-sky-700", "bg-sky-500", t("admin.users.activeWeek")]
+        : ["bg-slate-100 text-slate-600", "bg-slate-400", t("admin.users.inactive")];
+  return <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ${tone}`}><span className={`h-1.5 w-1.5 rounded-full ${dot}`} /> {label}</span>;
 }
 
 function IconAction({ label, onClick, icon: Icon, danger, active }) {
@@ -1026,7 +1043,7 @@ function UsersTab({ toast }) {
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">{f.date(u.createdAt)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{u.lastLoginAt ? f.relative(u.lastLoginAt) : <span className="text-slate-400">{t("admin.users.never")}</span>}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">{u.lastActiveAt || u.lastLoginAt ? f.relative(u.lastActiveAt || u.lastLoginAt) : <span className="text-slate-400">{t("admin.users.never")}</span>}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">{f.num(u.messages)}</td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700"><bdi dir="ltr">{formatBytes(u.storageBytes)}</bdi></td>
                     <td className="px-4 py-3 text-end tabular-nums text-slate-700">
@@ -1628,6 +1645,7 @@ export default function Admin() {
             <p className="mb-6 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-800">{t("admin.previewData")}</p>
           )}
           {!staffOnly && tab === "overview" && <Overview go={go} name={name} />}
+          {!staffOnly && tab === "advisor" && <AdvisorTab />}
           {!staffOnly && tab === "users" && <UsersTab toast={toast} />}
           {!staffOnly && tab === "broadcast" && <BroadcastTab toast={toast} />}
           {!staffOnly && tab === "settings" && <SettingsTab toast={toast} />}
