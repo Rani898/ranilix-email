@@ -270,3 +270,33 @@ body {
 @keyframes court-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes court-bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { [style*="court-idle"] { animation: none !important; } }
+
+/* Log-out door animation */
+.logout-fig .lf-arm-a, .logout-fig .lf-arm-b, .logout-fig .lf-leg-a, .logout-fig .lf-leg-b { transform-box: view-box; }
+.logout-fig .lf-arm-a, .logout-fig .lf-arm-b { transform-origin: 11.8px 9px; }
+.logout-fig .lf-leg-a, .logout-fig .lf-leg-b { transform-origin: 10.5px 14.5px; }
+.logout-fig.is-walking .lf-leg-a, .logout-fig.is-walking .lf-arm-b { animation: lf-swing 0.36s ease-in-out infinite alternate; }
+.logout-fig.is-walking .lf-leg-b, .logout-fig.is-walking .lf-arm-a { animation: lf-swing 0.36s ease-in-out infinite alternate-reverse; }
+@keyframes lf-swing { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+.logout-walk-in { inset-inline-start: 4px; animation: lf-walk-in 0.52s ease-in forwards; }
+@keyframes lf-walk-in { to { inset-inline-start: 26px; } }
+.logout-door.is-slam { animation: lf-shake 0.28s ease; }
+@keyframes lf-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px) rotate(-1deg); } 60% { transform: translateX(2px) rotate(1deg); } }
+.logout-lines { display: flex; flex-direction: column; gap: 3px; }
+.logout-lines i { display: block; height: 2px; width: 5px; border-radius: 2px; background: var(--color-chart); opacity: 0; animation: lf-lines 0.3s ease forwards; }
+.logout-lines i:nth-child(2) { width: 7px; animation-delay: 0.04s; }
+.logout-lines i:nth-child(3) { animation-delay: 0.08s; }
+@keyframes lf-lines { 0% { opacity: 0; transform: translateX(4px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translateX(-3px); } }
+.logout-fall { animation: lf-fall 0.95s cubic-bezier(0.45, 0, 0.8, 0.6) forwards; }
+@keyframes lf-fall {
+  0% { transform: translate(0, -6px) rotate(0deg); opacity: 0; }
+  12% { transform: translate(6px, -14px) rotate(40deg); opacity: 1; }
+  100% { transform: translate(28px, 70vh) rotate(560deg); opacity: 0.9; }
+}
+.logout-fall.is-rtl { animation-name: lf-fall-rtl; }
+@keyframes lf-fall-rtl {
+  0% { transform: translate(0, -6px) rotate(0deg); opacity: 0; }
+  12% { transform: translate(-6px, -14px) rotate(-40deg); opacity: 1; }
+  100% { transform: translate(-28px, 70vh) rotate(-560deg); opacity: 0.9; }
+}
+@media (prefers-reduced-motion: reduce) { .logout-fig.is-walking * { animation: none !important; } }

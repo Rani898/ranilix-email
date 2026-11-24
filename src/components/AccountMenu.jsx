@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Flag, HardDrive, Hourglass, LifeBuoy, LogOut, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
+import { Check, Flag, HardDrive, Hourglass, LifeBuoy, MailPlus, Settings, Smartphone, UserPlus } from "lucide-react";
 import TempAddressesDialog from "./TempAddressesDialog.jsx";
 import { openSupport } from "./SupportWidget.jsx";
 import SenderAvatar from "./SenderAvatar.jsx";
@@ -8,6 +8,7 @@ import ReportDialog from "./ReportDialog.jsx";
 import InstallDialog from "./InstallDialog.jsx";
 import { useInstall } from "../lib/pwa.js";
 import { getAccounts, switchAccount } from "../lib/session.js";
+import { LogoutDoor, useLogoutAnimation } from "./LogoutDoor.jsx";
 import { useI18n } from "../lib/i18n.jsx";
 
 /** Avatar button in the inbox top bar: shows saved accounts, switch between them, add one, sign out. */
@@ -15,6 +16,7 @@ export default function AccountMenu({ email, onLogout, usage, displayName, tempA
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState(null); // "report" | "install"
+  const exit = useLogoutAnimation(useCallback(() => { setOpen(false); onLogout(); }, [onLogout]));
   const app = useInstall();
   const installApp = async () => { setOpen(false); if (app.canPrompt) await app.install(); else setDialog("install"); };
   const ref = useRef(null);
@@ -117,8 +119,8 @@ export default function AccountMenu({ email, onLogout, usage, displayName, tempA
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Flag className="h-4 w-4" /></span>
               {t("report.menu")}
             </button>
-            <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); onLogout(); }}>
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><LogOut className="h-4 w-4 rtl:rotate-180" /></span>
+            <button type="button" role="menuitem" ref={exit.ref} className={item} onClick={exit.run} {...exit.hoverProps}>
+              <LogoutDoor phase={exit.phase} hover={exit.hover} />
               <span className="min-w-0">
                 {t("inbox.logout")}
                 {others.length > 0 && <span dir="ltr" className="block truncate text-xs font-normal text-slate-500 rtl:text-right">{email}</span>}
@@ -127,6 +129,7 @@ export default function AccountMenu({ email, onLogout, usage, displayName, tempA
           </div>
         </div>
       )}
+      {exit.portal}
       {dialog === "report" && <ReportDialog onClose={() => setDialog(null)} />}
       {dialog === "temp" && <TempAddressesDialog onClose={() => setDialog(null)} />}
       {dialog === "install" && <InstallDialog ios={app.ios} onClose={() => setDialog(null)} />}
