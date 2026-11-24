@@ -568,8 +568,7 @@ function Drive({ email }) {
   const openUpload = (files) => {
     const list = [...(files || [])];
     if (!list.length) return;
-    const calm = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (calm) uploadFiles(list); else setCourt({ files: list, id: Date.now() });
+    setCourt({ files: list, id: Date.now() });
   };
   const shootUpload = (file) => { let key = null; uploadFiles([file], (keys) => { key = keys[0]; }); return key; };
 

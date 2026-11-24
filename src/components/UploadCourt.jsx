@@ -241,7 +241,7 @@ export default function UploadCourt({ files: incoming, onShoot, onUploadAll, onC
   const addFiles = (list) => { if (list?.length) setQueue((q) => [...q, ...list]); };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-3 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget && !drag && !flight) onClose(); }}>
+    <div className="motion-ok fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-3 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget && !drag && !flight) onClose(); }}>
       <div role="dialog" aria-modal="true" aria-labelledby="court-title" className="w-full max-w-md rounded-[28px] border border-slate-200 bg-surface p-5 shadow-2xl sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>

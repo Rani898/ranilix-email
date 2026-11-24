@@ -4,8 +4,6 @@
 import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-const reduced = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-
 /** The stick figure (24×24). `walking` swings the arms and legs. */
 function Figure({ walking, className = "", style }) {
   return (
@@ -28,7 +26,7 @@ function Figure({ walking, className = "", style }) {
 export function LogoutDoor({ phase = "idle", hover = false }) {
   const inside = phase !== "idle";
   return (
-    <span className={`logout-door relative inline-block h-8 w-11 shrink-0 ${phase === "slam" ? "is-slam" : ""}`} aria-hidden="true">
+    <span className={`logout-door motion-ok relative inline-block h-8 w-11 shrink-0 ${phase === "slam" ? "is-slam" : ""}`} aria-hidden="true">
       <span className="absolute inset-0 rtl:-scale-x-100">
         {/* Door: frame + leaf. Open = a light gap on the hinge side. */}
         <span className="absolute end-1 top-0.5 bottom-0.5 w-[15px] rounded-[3px] bg-[var(--color-chart)]">
@@ -61,7 +59,6 @@ export function useLogoutAnimation(onDone) {
 
   const run = useCallback(() => {
     if (busy.current) return;
-    if (reduced()) { onDone(); return; }
     busy.current = true;
     setPhase("walk");
     setTimeout(() => {
@@ -74,7 +71,7 @@ export function useLogoutAnimation(onDone) {
   }, [onDone]);
 
   const portal = fall && createPortal(
-    <span className="pointer-events-none fixed z-[100] text-[var(--color-chart)]" style={{ left: fall.x, top: fall.y }} aria-hidden="true">
+    <span className="motion-ok pointer-events-none fixed z-[100] text-[var(--color-chart)]" style={{ left: fall.x, top: fall.y }} aria-hidden="true">
       <span className={`logout-fall block ${fall.rtl ? "is-rtl" : ""}`}><Figure walking className="h-7 w-7 -translate-x-1/2" /></span>
     </span>,
     document.body,

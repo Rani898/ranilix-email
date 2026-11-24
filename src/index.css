@@ -79,7 +79,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* Playful animations the user triggers on purpose (log-out door, basketball upload) stay on. */
+  :not(.motion-ok, .motion-ok *), :not(.motion-ok, .motion-ok *)::before, :not(.motion-ok, .motion-ok *)::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* Help window */
@@ -269,7 +270,6 @@ body {
 @keyframes court-net { 0% { transform: scaleY(1); } 35% { transform: scaleY(1.28) scaleX(0.9); } 70% { transform: scaleY(0.94); } 100% { transform: scaleY(1); } }
 @keyframes court-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes court-bump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { [style*="court-idle"] { animation: none !important; } }
 
 /* Log-out door animation */
 .logout-fig .lf-arm-a, .logout-fig .lf-arm-b, .logout-fig .lf-leg-a, .logout-fig .lf-leg-b { transform-box: view-box; }
@@ -299,4 +299,3 @@ body {
   12% { transform: translate(-6px, -14px) rotate(-40deg); opacity: 1; }
   100% { transform: translate(-28px, 70vh) rotate(-560deg); opacity: 0.9; }
 }
-@media (prefers-reduced-motion: reduce) { .logout-fig.is-walking * { animation: none !important; } }
