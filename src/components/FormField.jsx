@@ -6,7 +6,7 @@ import { useI18n } from "../lib/i18n.jsx";
  * Labeled input with error/hint text, optional suffix (e.g. "@ranilix.com") and password show/hide.
  * Email-like fields pass dir="ltr" so addresses read correctly inside Hebrew pages.
  */
-export default function FormField({ id, label, error, hint, suffix, type = "text", right, dir, ...props }) {
+export default function FormField({ id, label, error, hint, suffix, ghost, type = "text", right, dir, ...props }) {
   const { t } = useI18n();
   const [show, setShow] = useState(false);
   const isPassword = type === "password";
@@ -24,6 +24,12 @@ export default function FormField({ id, label, error, hint, suffix, type = "text
           error ? "border-rose-400 focus-within:ring-rose-200" : "border-slate-300 focus-within:border-brand-500 focus-within:ring-brand-100"
         }`}
       >
+        <div className="relative min-w-0 flex-1">
+        {ghost && (
+          <span aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre px-4 py-3 text-base">
+            <span className="invisible">{props.value}</span><span className="text-slate-400">{ghost}</span>
+          </span>
+        )}
         <input
           id={id}
           type={isPassword && show ? "text" : type}
@@ -32,6 +38,7 @@ export default function FormField({ id, label, error, hint, suffix, type = "text
           className="w-full min-w-0 rounded-xl bg-transparent px-4 py-3 text-base text-slate-900 placeholder:text-slate-400 focus:outline-none"
           {...props}
         />
+        </div>
         {suffix && <span className="shrink-0 pe-4 text-base font-medium text-slate-500">{suffix}</span>}
         {isPassword && (
           <button

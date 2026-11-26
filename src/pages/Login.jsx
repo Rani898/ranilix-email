@@ -12,7 +12,11 @@ import { useErrorText, useI18n } from "../lib/i18n.jsx";
 function normalizeEmail(value) {
   const v = value.trim().toLowerCase();
   if (!v) return "";
-  return v.includes("@") ? v : `${v}@${BRAND.domain}`;
+  if (!v.includes("@")) return `${v}@${BRAND.domain}`;
+  const [name, dom] = v.split("@");
+  // "rani@" or "rani@ranilix" → complete to our own domain.
+  if (!dom || `${BRAND.domain}`.startsWith(dom)) return `${name}@${BRAND.domain}`;
+  return v;
 }
 
 export default function Login() {
@@ -62,7 +66,8 @@ export default function Login() {
           id="email"
           dir="ltr"
           label={t("login.email")}
-          placeholder={`yourname@${BRAND.domain}`}
+          placeholder="yourname"
+          ghost={email && !email.includes("@") ? `@${BRAND.domain}` : null}
           autoComplete="username"
           autoFocus
           inputMode="email"
