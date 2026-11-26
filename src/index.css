@@ -299,3 +299,17 @@ body {
   12% { transform: translate(-6px, -14px) rotate(-40deg); opacity: 1; }
   100% { transform: translate(-28px, 70vh) rotate(-560deg); opacity: 0.9; }
 }
+
+/* Wrapped stories */
+.wr-in { animation: wr-in 0.45s ease both; }
+@keyframes wr-in { from { opacity: 0; transform: scale(1.03); } to { opacity: 1; transform: none; } }
+.wr-up { animation: wr-up 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes wr-up { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+.wr-pop { animation: wr-pop 0.7s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+@keyframes wr-pop { from { opacity: 0; transform: scale(0.4) rotate(-12deg); } to { opacity: 1; transform: none; } }
+.wr-bar { transform-origin: bottom; animation: wr-bar 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes wr-bar { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.wr-blob { animation: wr-float 7s ease-in-out infinite alternate; }
+.wr-blob2 { animation: wr-float 9s ease-in-out infinite alternate-reverse; }
+@keyframes wr-float { to { transform: translate(-30px, 40px) scale(1.15); } }
+.wr-slide { user-select: none; -webkit-user-select: none; touch-action: manipulation; transition: background 0.5s ease; }

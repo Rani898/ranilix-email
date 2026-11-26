@@ -13,6 +13,7 @@ import Room from "./pages/Room.jsx";
 import Receipts from "./pages/Receipts.jsx";
 import Calendar from "./pages/Calendar.jsx";
 const DesignLab = lazy(() => import("./pages/DesignLab.jsx"));
+const Wrapped = lazy(() => import("./pages/Wrapped.jsx"));
 import { useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
@@ -48,10 +49,11 @@ export default function App() {
         <Route path="/room" element={<Room />} />
         <Route path="/receipts" element={<Receipts />} />
         <Route path="/calendar" element={<Calendar />} />
+        <Route path="/wrapped" element={<Suspense fallback={null}><Wrapped /></Suspense>} />
         <Route path="/lab" element={<Suspense fallback={null}><DesignLab /></Suspense>} />
         <Route path="*" element={<Landing />} />
       </Routes>
-      {!onboarding && !pathname.startsWith("/admin") && !pathname.startsWith("/room") && <SupportWidget />}
+      {!onboarding && !pathname.startsWith("/admin") && !pathname.startsWith("/room") && !pathname.startsWith("/wrapped") && <SupportWidget />}
     </>
   );
 }

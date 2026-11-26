@@ -14,6 +14,7 @@ import { notifyUser, validPushEndpoint, vapidPublicKey } from "./push.js";
 import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
 import { advisorRoute } from "./advisor.js";
+import { wrappedRoute } from "./wrapped.js";
 import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
 import { calendarRoute } from "./calendar.js";
 import { siteOwner, sitesCleanup, sitesRoute } from "./sites.js";
@@ -920,6 +921,7 @@ async function route(req, env, log) {
   if (path.startsWith("/api/receipts")) return receiptsRoute(req, env, path, url, user, { HttpError, json, readJson, rateLimit, htmlToText, insertMessage, notifyUser });
   if (path.startsWith("/api/events")) return calendarRoute(req, env, path, url, user, { HttpError, json, readJson });
 
+  if (path === "/api/wrapped") return wrappedRoute(req, env, path, url, user, { HttpError, json });
   if (path.startsWith("/api/ai/advisor")) return advisorRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
   if (path.startsWith("/api/ai/")) return aiRoute(req, env, path, user, { HttpError, json, readJson, rateLimit, log, admin: isAdmin(env, user.username) });
   if (path.startsWith("/api/skin")) return skinRoute(req, env, path, url, user, { HttpError, json, readJson, randomHex, admin: isAdmin(env, user.username) });

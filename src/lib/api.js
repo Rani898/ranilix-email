@@ -210,6 +210,15 @@ demo.getAnnouncement = async () => {
   } catch { return { enabled: false }; }
 };
 live.getMe = () => request("/api/me", { auth: true });
+live.wrapped = (year) => request(`/api/wrapped${year ? `?year=${year}` : ""}`, { auth: true });
+demo.wrapped = async () => ({
+  year: new Date().getFullYear(), email: demoEmail(), memberSince: Date.now() - 200 * 86400000, daysWithUs: 200,
+  received: 1284, sent: 213, starred: 31, attachments: 96, attachmentBytes: 312e6,
+  topSenders: [{ name: "Wolt", addr: "info@wolt.com", count: 142 }, { name: "Google", addr: "no-reply@accounts.google.com", count: 88 }, { name: "Noa", addr: "noa@ranilix.com", count: 41 }],
+  months: [40, 62, 81, 77, 95, 120, 133, 101, 110, 150, 205, 110], busiestMonth: 11, busiestWeekday: 2, busiestHour: 21,
+  busiestDay: { day: `${new Date().getFullYear()}-11-03`, count: 37 }, tempAddresses: 7, siteAddresses: 12, shieldCaught: 318,
+  driveFiles: 64, driveBytes: 1.8e9, driveShared: 9, receipts: 23, receiptsIls: 2840, events: 18, mochiChats: 54, topPercent: 8,
+});
 live.sessions = () => request("/api/sessions", { auth: true });
 live.revokeSession = (id) => request(`/api/sessions/${id}`, { method: "DELETE", auth: true });
 live.revokeOtherSessions = () => request("/api/sessions", { method: "DELETE", auth: true });
@@ -553,7 +562,7 @@ export const {
   getMe, getAnnouncement, checkLatest, getSkin, saveSkin, aiChat, aiSend, aiClear, receipts, receiptsScan, receiptsSettings, receiptsSendSummary, receiptUpdate, events, eventCreate, eventUpdate, eventDelete, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
-  sessions, revokeSession, revokeOtherSessions,
+  sessions, revokeSession, revokeOtherSessions, wrapped,
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
