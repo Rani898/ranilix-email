@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Flag, HardDrive, Hourglass, LifeBuoy, MailPlus, Settings, Smartphone, Sparkles, UserPlus } from "lucide-react";
+import { Check, Flag, Gift, HardDrive, Hourglass, LifeBuoy, MailPlus, Settings, Smartphone, Sparkles, UserPlus } from "lucide-react";
 import TempAddressesDialog from "./TempAddressesDialog.jsx";
 import { openSupport } from "./SupportWidget.jsx";
 import SenderAvatar from "./SenderAvatar.jsx";
 import ReportDialog from "./ReportDialog.jsx";
 import InstallDialog from "./InstallDialog.jsx";
+import InviteDialog from "./InviteDialog.jsx";
 import { useInstall } from "../lib/pwa.js";
 import { getAccounts, switchAccount } from "../lib/session.js";
 import { LogoutDoor, useLogoutAnimation } from "./LogoutDoor.jsx";
@@ -106,6 +107,10 @@ export default function AccountMenu({ email, onLogout, usage, displayName, tempA
               <span className="min-w-0 flex-1">{t("wrapped.menu", { year: new Date().getFullYear() })}</span>
               <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-700">{t("wrapped.new")}</span>
             </Link>
+            <button type="button" role="menuitem" className={item} onClick={() => { setOpen(false); setDialog("invite"); }}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700"><Gift className="h-4 w-4" /></span>
+              {t("invite.menu")}
+            </button>
             <Link to="/settings" role="menuitem" className={item} onClick={() => setOpen(false)}>
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Settings className="h-4 w-4" /></span>
               {t("settings.title")}
@@ -137,6 +142,7 @@ export default function AccountMenu({ email, onLogout, usage, displayName, tempA
       {exit.portal}
       {dialog === "report" && <ReportDialog onClose={() => setDialog(null)} />}
       {dialog === "temp" && <TempAddressesDialog onClose={() => setDialog(null)} />}
+      {dialog === "invite" && <InviteDialog onClose={() => setDialog(null)} />}
       {dialog === "install" && <InstallDialog ios={app.ios} onClose={() => setDialog(null)} />}
     </div>
   );

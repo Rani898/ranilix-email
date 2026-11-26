@@ -15,6 +15,7 @@ import { getSkin, skinPublicRoute, skinRoute } from "./skin.js";
 import { aiRoute } from "./ai.js";
 import { advisorRoute } from "./advisor.js";
 import { wrappedRoute } from "./wrapped.js";
+import { inviteInfo, promoFooter, promoFooterOn, recordReferral, setPromoFooter } from "./growth.js";
 import { monthlySummaries, noteReceipt, receiptsRoute } from "./money.js";
 import { calendarRoute } from "./calendar.js";
 import { siteOwner, sitesCleanup, sitesRoute } from "./sites.js";
@@ -732,7 +733,7 @@ async function route(req, env, log) {
   }
 
   if (path === "/api/signup" && req.method === "POST") {
-    const { username, password, lang, accountTokens } = await readJson(req);
+    const { username, password, lang, accountTokens, ref } = await readJson(req);
     const u = String(username || "").toLowerCase();
     const uErr = validateUsername(u);
     if (uErr) throw new HttpError(400, uErr);
@@ -774,8 +775,10 @@ async function route(req, env, log) {
     const welcome = (WELCOME[lang] || WELCOME.en)(email);
     await insertMessage(env, userId, { folder: "inbox", fromName: "Ranilix Team", fromAddr: `team@${env.MAIL_DOMAIN}`, to: email, ...welcome });
     await env.DB.prepare("INSERT OR IGNORE INTO user_meta (user_id, last_login_at) VALUES (?, ?)").bind(userId, Date.now()).run();
+    // Invites count only for brand-new people, not for someone opening another address of their own.
+    const invitedBy = !ownerId && ref ? await recordReferral(env, userId, ref).catch(() => null) : null;
     const token = await createSession(env, userId, true, req);
-    log("signups", "🆕 משתמש חדש", { "כתובת": email, "מדינה": country, "כתובת נוספת של": creator ? `${creator.username}@${env.MAIL_DOMAIN}` : "" });
+    log("signups", "🆕 משתמש חדש", { "כתובת": email, "מדינה": country, "כתובת נוספת של": creator ? `${creator.username}@${env.MAIL_DOMAIN}` : "", "הוזמן על ידי": invitedBy ? `${invitedBy}@${env.MAIL_DOMAIN}` : "" });
     return json({ token, email }, 201);
   }
 
@@ -960,9 +963,11 @@ async function route(req, env, log) {
   }
 
   /* ---- Account settings ---- */
-  if (path === "/api/profile" && req.method === "GET") return json(await getProfile(env, user.id));
+  if (path === "/api/profile" && req.method === "GET") return json({ ...(await getProfile(env, user.id)), promoFooter: await promoFooterOn(env, user.id) });
+  if (path === "/api/invite" && req.method === "GET") return json(await inviteInfo(env, user));
   if (path === "/api/profile" && req.method === "PUT") {
-    const { displayName, signature } = await readJson(req);
+    const { displayName, signature, promoFooter: footerOn } = await readJson(req);
+    if (typeof footerOn === "boolean") await setPromoFooter(env, user.id, footerOn);
     const fields = {};
     if (displayName !== undefined) {
       fields.display_name = cleanName(displayName);
@@ -972,9 +977,11 @@ async function route(req, env, log) {
       }
     }
     if (signature !== undefined) fields.signature = String(signature || "").slice(0, 1000);
-    await upsertProfile(env, user.id, fields);
-    log("accounts", "✏️ עדכון פרופיל", { "כתובת": user.email, "שם": fields.display_name, "חתימה": fields.signature !== undefined ? "עודכנה" : "" });
-    return json(await getProfile(env, user.id));
+    if (Object.keys(fields).length) {
+      await upsertProfile(env, user.id, fields);
+      log("accounts", "✏️ עדכון פרופיל", { "כתובת": user.email, "שם": fields.display_name, "חתימה": fields.signature !== undefined ? "עודכנה" : "" });
+    }
+    return json({ ...(await getProfile(env, user.id)), promoFooter: await promoFooterOn(env, user.id) });
   }
   if (path === "/api/profile/avatar" && req.method === "PUT") {
     const { dataUrl } = await readJson(req);
@@ -1175,6 +1182,7 @@ async function route(req, env, log) {
         const data = env.FILES ? await env.FILES.get(a.kv_key, "arrayBuffer") : null;
         if (data) attachments.push({ filename: a.filename, content: Buffer.from(data).toString("base64") });
       }
+      const footer = (await promoFooterOn(env, user.id)) ? promoFooter(env, user.username) : "";
       let res;
       try {
         res = await fetch("https://api.resend.com/emails", {
@@ -1184,7 +1192,7 @@ async function route(req, env, log) {
           from: `"${senderName.replace(/["\\]/g, "")}" <${user.email}>`,
           to: external,
           subject: String(subject || "").trim() || "(no subject)",
-          text: String(body || ""),
+          text: String(body || "") + footer,
           ...(attachments.length ? { attachments } : {}),
         }),
         });

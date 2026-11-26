@@ -4,6 +4,7 @@ import he from "../i18n/he.js";
 
 const DICTS = { en, he };
 const KEY = "ranilix.lang";
+export const SEO_PATH_RE = /^\/(free-email|email-without-phone|temp-email|gmail-alternative|private-email|hebrew-email|guides)(\/|$)/;
 const I18nContext = createContext(null);
 
 function initialLang() {
@@ -13,6 +14,8 @@ function initialLang() {
     if (q && DICTS[q]) { try { localStorage.setItem(KEY, q); } catch { /* ignore */ } return q; }
     const saved = localStorage.getItem(KEY);
     if (saved && DICTS[saved]) return saved;
+    // Search pages are written for Hebrew searches, so they open in Hebrew unless the visitor chose otherwise.
+    if (SEO_PATH_RE.test(window.location.pathname.replace(import.meta.env.BASE_URL || "/", "/"))) return "he";
     // First visit: match the browser. Hebrew speakers get Hebrew; everyone else English.
     if (/^he\b/i.test(navigator.language || "")) return "he";
   } catch { /* ignore */ }

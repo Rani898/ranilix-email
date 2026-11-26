@@ -14,8 +14,10 @@ import Receipts from "./pages/Receipts.jsx";
 import Calendar from "./pages/Calendar.jsx";
 const DesignLab = lazy(() => import("./pages/DesignLab.jsx"));
 const Wrapped = lazy(() => import("./pages/Wrapped.jsx"));
-import { useI18n } from "./lib/i18n.jsx";
+const SeoPage = lazy(() => import("./pages/SeoPage.jsx"));
+import { SEO_PATH_RE, useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
+import { captureRef } from "./lib/api.js";
 import Onboarding, { needsOnboarding } from "./components/Onboarding.jsx";
 import SupportWidget from "./components/SupportWidget.jsx";
 import SkinDecor from "./components/SkinDecor.jsx";
@@ -26,16 +28,20 @@ function ScrollToTop() {
   return null;
 }
 
+// Search engines should see the page itself, not the first-visit language picker.
+const IS_BOT = typeof navigator !== "undefined" && /bot|crawl|spider|slurp|lighthouse/i.test(navigator.userAgent || "");
+
 export default function App() {
   const [onboarding, setOnboarding] = useState(needsOnboarding);
   const { lang } = useI18n();
   const { pathname } = useLocation();
   useEffect(() => { shareLang(lang); }, [lang]);
+  useEffect(() => { captureRef(); }, []);
   return (
     <>
       <ScrollToTop />
       <SkinDecor />
-      {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
+      {onboarding && !SEO_PATH_RE.test(pathname) && !IS_BOT && <Onboarding onDone={() => setOnboarding(false)} />}
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/signup" element={<SignUp />} />
@@ -51,6 +57,14 @@ export default function App() {
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/wrapped" element={<Suspense fallback={null}><Wrapped /></Suspense>} />
         <Route path="/lab" element={<Suspense fallback={null}><DesignLab /></Suspense>} />
+        <Route path="/free-email" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/email-without-phone" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/temp-email" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/gmail-alternative" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/private-email" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/hebrew-email" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/guides" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/guides/:slug" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
         <Route path="*" element={<Landing />} />
       </Routes>
       {!onboarding && !pathname.startsWith("/admin") && !pathname.startsWith("/room") && !pathname.startsWith("/wrapped") && <SupportWidget />}

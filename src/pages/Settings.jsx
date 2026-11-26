@@ -127,6 +127,14 @@ function ProfileSection({ email, profile, onChange, onAuth }) {
             className="mt-1.5 w-full resize-y rounded-xl border border-slate-300 bg-surface px-4 py-3 text-sm leading-relaxed text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100" />
           <p className="mt-1 text-xs text-slate-500">{t("settings.signatureHint")}</p>
         </div>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={profile.promoFooter !== false}
+            onChange={async (e) => { const on = e.target.checked; try { onChange(await updateProfile({ promoFooter: on })); } catch (err) { fail(err); } }} />
+          <span>
+            <span className="block text-sm font-semibold text-slate-800">{t("settings.promoFooter")}</span>
+            <span className="mt-0.5 block text-xs text-slate-500">{t("settings.promoFooterHint")}</span>
+          </span>
+        </label>
         {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={!!busy}>{busy === "save" && <Loader2 className="h-4 w-4 animate-spin" />}{t("settings.save")}</Button>

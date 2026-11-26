@@ -501,3 +501,15 @@ CREATE TABLE IF NOT EXISTS site_expiry (
   local      TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL
 );
+-- Invite-a-friend: who brought whom (one row per new user, written at sign-up).
+CREATE TABLE IF NOT EXISTS referrals (
+  referred_id  INTEGER PRIMARY KEY,
+  referrer_id  INTEGER NOT NULL,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ref_referrer ON referrals(referrer_id);
+-- Users who turned off the "Sent with Ranilix" line at the bottom of outgoing mail.
+CREATE TABLE IF NOT EXISTS promo_footer_off (
+  user_id      INTEGER PRIMARY KEY,
+  at           INTEGER NOT NULL
+);

@@ -118,7 +118,7 @@ const live = {
   // accountTokens: addresses already signed in on this browser, so the new one joins the same person (max 5 by default).
   signUp: ({ username, password }) => request("/api/signup", {
     method: "POST",
-    body: { username, password, lang: document.documentElement.lang || "en", accountTokens: getAccounts().map((a) => a.token).filter(Boolean) },
+    body: { username, password, lang: document.documentElement.lang || "en", accountTokens: getAccounts().map((a) => a.token).filter(Boolean), ref: readRef() },
   }),
   logIn: ({ email, password, remember }) => request("/api/login", { method: "POST", body: { email, password, remember } }),
   async logOut() { try { await request("/api/logout", { method: "POST", auth: true }); } catch { /* ignore */ } },
@@ -210,6 +210,8 @@ demo.getAnnouncement = async () => {
   } catch { return { enabled: false }; }
 };
 live.getMe = () => request("/api/me", { auth: true });
+live.invite = () => request("/api/invite", { auth: true });
+demo.invite = async () => ({ code: demoEmail()?.split("@")[0] || "you", count: 3, bonusMb: 300, perFriendMb: 100, friendMb: 50, maxRewards: 10 });
 live.wrapped = (year) => request(`/api/wrapped${year ? `?year=${year}` : ""}`, { auth: true });
 demo.wrapped = async () => ({
   year: new Date().getFullYear(), email: demoEmail(), memberSince: Date.now() - 200 * 86400000, daysWithUs: 200,
@@ -282,7 +284,7 @@ const demoProfile = () => {
   try { return { displayName: "", signature: "", avatar: null, ...JSON.parse(localStorage.getItem(DEMO_PROFILE(demoEmail())) || "{}") }; } catch { return { displayName: "", signature: "", avatar: null }; }
 };
 const saveDemoProfile = (p) => { try { localStorage.setItem(DEMO_PROFILE(demoEmail()), JSON.stringify(p)); } catch { /* ignore */ } };
-const publicProfile = (p) => ({ displayName: p.displayName, signature: p.signature, hasAvatar: !!p.avatar, updatedAt: p.updatedAt || 0, avatar: p.avatar || null });
+const publicProfile = (p) => ({ displayName: p.displayName, signature: p.signature, promoFooter: p.promoFooter !== false, hasAvatar: !!p.avatar, updatedAt: p.updatedAt || 0, avatar: p.avatar || null });
 demo.getProfile = async () => publicProfile(demoProfile());
 demo.updateProfile = async (patch) => { const p = { ...demoProfile(), ...patch, updatedAt: Date.now() }; saveDemoProfile(p); return publicProfile(p); };
 demo.setAvatar = async (dataUrl) => { const p = { ...demoProfile(), avatar: dataUrl, updatedAt: Date.now() }; saveDemoProfile(p); return publicProfile(p); };
@@ -562,10 +564,25 @@ export const {
   getMe, getAnnouncement, checkLatest, getSkin, saveSkin, aiChat, aiSend, aiClear, receipts, receiptsScan, receiptsSettings, receiptsSendSummary, receiptUpdate, events, eventCreate, eventUpdate, eventDelete, uploadSkinBackground, removeSkinBackground, uploadSkinSticker, removeSkinSticker,
   googleStatus, googleStart, googleDisconnect, gmailList, gmailGet,
   getProfile, updateProfile, setAvatar, removeAvatar, changePassword, deleteAccount, sendReport,
-  sessions, revokeSession, revokeOtherSessions, wrapped,
+  sessions, revokeSession, revokeOtherSessions, wrapped, invite,
   pushKey, pushSubscribe, pushUnsubscribe,
   supportInfo, supportThreads, supportThread, supportStart, supportSend, supportRate,
   getAutoReply, saveAutoReply, tempList, tempCreate, tempExtend, tempDelete,
   driveList, driveFolders, driveCreateFolder, driveRename, driveMove, driveDelete, driveShare, driveShareReset, driveSaveAttachment, driveSetCover, driveRemoveCover,
   driveDownload, driveShareUrl, driveUpload, driveLink, driveLinks, sharedInfo, sharedFileUrl, sharedFetch, sharedList, sharedItemUrl, driveShareVisits, driveShareBlocks, driveShareBlock, driveShareUnblock, sharedRequest, sharedAppeal, driveShareMode, driveShareRequests, driveShareDecide,
 } = api;
+
+// Invite links (?ref=name) are remembered for a week, so the bonus still counts if the friend browses first.
+const REF_KEY = "ranilix.ref";
+export function captureRef() {
+  try {
+    const r = new URLSearchParams(window.location.search).get("ref");
+    if (r && /^[a-z0-9._-]{1,40}$/i.test(r)) localStorage.setItem(REF_KEY, JSON.stringify({ r: r.toLowerCase(), at: Date.now() }));
+  } catch { /* ignore */ }
+}
+function readRef() {
+  try {
+    const v = JSON.parse(localStorage.getItem(REF_KEY) || "null");
+    return v && Date.now() - v.at < 7 * 864e5 ? v.r : undefined;
+  } catch { return undefined; }
+}

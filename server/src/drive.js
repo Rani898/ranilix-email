@@ -1,3 +1,4 @@
+import { referralBonusBytes } from "./growth.js";
 // Drive: personal file storage inside each account.
 // Files live in Cloudflare R2 when the DRIVE bucket is connected (10 GB free), otherwise in the
 // KV namespace FILES that mail attachments already use (1 GB free for the whole site).
@@ -108,7 +109,7 @@ export async function driveDefaultMb(env) {
 export async function quotaOf(env, userId, isAdminUser = false) {
   if (isAdminUser) return maxQuotaBytes(env);
   const row = await env.DB.prepare("SELECT quota_bytes FROM drive_quota WHERE user_id = ?").bind(userId).first();
-  const q = row ? row.quota_bytes : (await driveDefaultMb(env)) * MB;
+  const q = (row ? row.quota_bytes : (await driveDefaultMb(env)) * MB) + await referralBonusBytes(env, userId);
   return Math.min(q, await maxQuotaBytes(env));
 }
 export async function usedBy(env, userId) {
