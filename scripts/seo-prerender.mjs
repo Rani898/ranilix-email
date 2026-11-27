@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GUIDES_INDEX, SEO_PAGES, SITE } from "../src/seo/pages.js";
+import he from "../src/i18n/he.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "dist");
@@ -84,6 +85,34 @@ for (const page of SEO_PAGES) {
   write("guides", setBody(setHead(template, { url, title: c.title, description: c.description, graph }), body));
 }
 
+// Trust pages (/about, /security, /terms, /contact): static Hebrew text, so search engines and AI tools read it.
+const CONTACT = "rani@ranilix.com";
+const withMail = (t) => txt(t).replace("{email}", `<a href="mailto:${CONTACT}">${CONTACT}</a>`);
+for (const key of ["about", "security", "terms", "contact"]) {
+  const c = he.info[key];
+  const url = `${SITE}/${key}`;
+  const title = `${c.title} · Ranilix`;
+  const graph = [
+    { "@type": key === "about" ? "AboutPage" : key === "contact" ? "ContactPage" : "WebPage", "@id": `${url}#page`, name: c.title, description: c.intro, inLanguage: "he", url, isPartOf: { "@id": `${SITE}/#website` } },
+    crumbs([["Ranilix", `${SITE}/`], [c.title, url]]),
+  ];
+  const body = `<main dir="rtl" lang="he" style="max-width:48rem;margin:0 auto;padding:2rem 1rem;font-family:Heebo,system-ui,sans-serif">${nav}<h1>${esc(c.title)}</h1><p>${txt(c.intro)}</p>`
+    + c.sections.map((s) => `<section><h2>${esc(s.h)}</h2>${s.p.map((p) => `<p>${withMail(p)}</p>`).join("")}</section>`).join("") + `</main>`;
+  write(key, setBody(setHead(template, { url, title, description: c.intro, graph }), body));
+}
+
+// Home page: keep a clean copy as the app shell for private routes, then give "/" readable static text.
+writeFileSync(join(dist, "shell.html"), template);
+{
+  const t = he.trust;
+  const body = `<main dir="rtl" lang="he" style="max-width:48rem;margin:0 auto;padding:2rem 1rem;font-family:Heebo,system-ui,sans-serif">${nav}`
+    + `<h1>Ranilix · אימייל חינם לתמיד בכתובת משלך</h1><p>כתובת @ranilix.com משלכם תוך דקה, בלי מספר טלפון, בלי כרטיס אשראי ובלי פרסומות. השירות נבנה ומופעל בישראל על ידי מפתח עצמאי.</p>`
+    + `<section><h2>${esc(t.title)}</h2><h3>${esc(t.mailTitle)}</h3><ul>${t.mail.map((p) => `<li>${txt(p)}</li>`).join("")}</ul><h3>${esc(t.gmailTitle)}</h3><ul>${t.gmail.map((p) => `<li>${txt(p)}</li>`).join("")}</ul></section>`
+    + `<nav><a href="/about">אודות</a> · <a href="/security">אבטחה ופרטיות</a> · <a href="/terms">תנאי שימוש</a> · <a href="/privacy">מדיניות פרטיות</a> · <a href="/contact">יצירת קשר</a></nav>`
+    + `<nav><h2>מידע ומדריכים</h2><ul>${SEO_PAGES.map((p) => `<li><a href="/${p.slug}">${esc(p.he.h1)}</a></li>`).join("")}</ul></nav></main>`;
+  writeFileSync(join(dist, "index.html"), setBody(template, body));
+}
+
 // Sitemap: home + public pages + every search page.
 const entry = (path, freq, prio, alt = true) => {
   const loc = `${SITE}${path}`;
@@ -97,6 +126,10 @@ const urls = [
   entry("/signup", "monthly", "0.8", false),
   entry("/login", "monthly", "0.5", false),
   entry("/privacy", "yearly", "0.3", false),
+  entry("/security", "monthly", "0.5", false),
+  entry("/about", "monthly", "0.5", false),
+  entry("/terms", "yearly", "0.3", false),
+  entry("/contact", "yearly", "0.3", false),
 ];
 writeFileSync(join(dist, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join("\n")}\n</urlset>\n`);
-console.log(`SEO: wrote ${SEO_PAGES.length + 1} pages and sitemap.xml (${urls.length} urls)`);
+console.log(`SEO: wrote ${SEO_PAGES.length + 5} pages + home and sitemap.xml (${urls.length} urls)`);

@@ -188,7 +188,7 @@ export default function SignUp() {
             />
             <span>
               {t("signup.agree", {
-                terms: <a href="#" className="font-semibold text-brand-600 hover:underline">{t("signup.terms")}</a>,
+                terms: <Link to="/terms" target="_blank" className="font-semibold text-brand-600 hover:underline">{t("signup.terms")}</Link>,
                 privacy: <a href="#" className="font-semibold text-brand-600 hover:underline">{t("signup.privacyPolicy")}</a>,
               })}
             </span>

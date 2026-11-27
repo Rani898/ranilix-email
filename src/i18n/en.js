@@ -118,6 +118,8 @@ export default {
     login: "I already have an account",
   },
   footer: {
+    links2: { about: "About", security: "Security", terms: "Terms", contact: "Contact" },
+    company: "Company",
     learn: "Learn",
     links: { freeEmail: "Free email", noPhone: "Email without a phone", tempEmail: "Sign-up email", gmailAlt: "Gmail alternative", privateEmail: "Private email", guides: "Guides" },
     privacyPolicy: "Privacy policy",
@@ -980,6 +982,198 @@ export default {
     faq: "Questions",
     related: "More on the site",
     allGuides: "All guides",
+  },
+  trust: {
+    "eyebrow": "Full transparency",
+    "title": "What actually happens to your mail",
+    "desc": "No big words: this is how Ranilix protects your inbox, and what happens when you connect Gmail.",
+    "mailTitle": "Your mail at Ranilix",
+    "mail": [
+      "Every connection to the site is encrypted (HTTPS), on phone and computer.",
+      "We never store your password. Only a one-way hash (PBKDF2) is kept, so even we can't tell what it is.",
+      "Our admin panel has no tool for reading users' mail, and we don't scan it for advertising.",
+      "Settings shows every device signed in to your account, and you can sign any of them out remotely.",
+      "To be honest: mail is not end-to-end encrypted. Like most email services, it's stored on the server so you can search and read it from any device."
+    ],
+    "gmailTitle": "When you connect Gmail",
+    "gmail": [
+      "You approve it on Google's own screen. We never see your Gmail password.",
+      "The permission is read-only: Ranilix can't send, delete or change anything in your Gmail.",
+      "Messages load straight from Google when you open them and aren't saved on our side.",
+      "Only the access key Google gives us is stored, and it's encrypted (AES-GCM).",
+      "Disconnecting in Settings revokes the permission at Google and deletes the key. You can also revoke it from your Google account."
+    ],
+    "more": "All the security details"
+  },
+  info: {
+    "back": "Back to home",
+    "updated": "Last updated: November 2026",
+    "about": {
+      "title": "About Ranilix",
+      "intro": "Ranilix is a small, independent, free email service built in Israel.",
+      "sections": [
+        {
+          "h": "Who runs it",
+          "p": [
+            "Ranilix is built and run by Rani, an independent developer from Israel. It launched in 2026, and I answer the messages that come in through chat and email myself."
+          ]
+        },
+        {
+          "h": "Why it's free",
+          "p": [
+            "The service runs on Cloudflare's cloud infrastructure, which keeps costs very low. I cover those small costs myself.",
+            "There are no ads in the inbox and we don't sell data. If paid options are ever added, they'll be extras, not a condition for basic use."
+          ]
+        },
+        {
+          "h": "The principle",
+          "p": [
+            "Your inbox belongs to you. No phone number, no credit card, and no reading your mail for advertising."
+          ]
+        },
+        {
+          "h": "Contact",
+          "p": [
+            "Questions, ideas or problems: {email}, or the chat in the corner of the screen."
+          ]
+        }
+      ]
+    },
+    "security": {
+      "title": "Security and privacy",
+      "intro": "A plain, accurate explanation of how Ranilix protects your account and mail, including what it doesn't do.",
+      "sections": [
+        {
+          "h": "Encrypted connection",
+          "p": [
+            "All traffic between your browser, the site and the server is encrypted with HTTPS, and the site requires encrypted connections (HSTS)."
+          ]
+        },
+        {
+          "h": "Passwords",
+          "p": [
+            "Your password isn't stored. Only a one-way hash (PBKDF2-SHA256 with a unique salt) is kept, which can't be turned back into the password.",
+            "Sign-in attempts are limited to make password guessing harder."
+          ]
+        },
+        {
+          "h": "Where mail is stored",
+          "p": [
+            "Mail and files are stored on Cloudflare's servers. Like most email services they aren't end-to-end encrypted, so you can search and read them from any device.",
+            "The Ranilix admin panel has no tool for reading users' mail, and we don't scan it for advertising."
+          ]
+        },
+        {
+          "h": "Connecting Gmail",
+          "p": [
+            "You connect through Google's own approval screen, and we never see your Gmail password.",
+            "The permission is read-only (gmail.readonly): Ranilix can't send, delete or change anything in Gmail.",
+            "Messages load from Google while you view them and aren't saved on our side. Only the access key is stored, encrypted with AES-GCM.",
+            "Disconnecting in Settings revokes the permission at Google and deletes the key. You can also revoke it in your Google account's third-party access page."
+          ]
+        },
+        {
+          "h": "The AI helper",
+          "p": [
+            "Mochi, the Ranilix helper, runs on Cloudflare's servers. Text is sent to it only when you ask it for something."
+          ]
+        },
+        {
+          "h": "Control over your account",
+          "p": [
+            "Settings shows every signed-in device with rough location and time, and you can sign it out remotely.",
+            "Deleting your account removes the inbox, files and personal data."
+          ]
+        },
+        {
+          "h": "Found a security issue?",
+          "p": [
+            "Please tell us: {email}. We'll handle it quickly."
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "title": "Terms of service",
+      "intro": "Using Ranilix means agreeing to these terms. We wrote them in plain language.",
+      "sections": [
+        {
+          "h": "The service",
+          "p": [
+            "Ranilix provides a free inbox plus tools like Drive, calendar and an AI helper. The service is provided as is. We work hard to keep it running, but can't promise full availability or that data will never be lost. Keep backups of anything important."
+          ]
+        },
+        {
+          "h": "Your account",
+          "p": [
+            "You're responsible for keeping your password safe. Since there's no phone recovery, a forgotten password may lock you out.",
+            "You may open up to 5 addresses per person, unless set otherwise."
+          ]
+        },
+        {
+          "h": "Not allowed",
+          "p": [
+            "Don't use Ranilix for spam, fraud or phishing, spreading malware, harassment, impersonation or anything illegal.",
+            "Sending limits keep the service clean. Trying to get around them isn't allowed."
+          ]
+        },
+        {
+          "h": "Suspension and closing",
+          "p": [
+            "We may suspend or close an account that breaks these terms or harms the service or other users.",
+            "You can delete your account at any time from Settings."
+          ]
+        },
+        {
+          "h": "Privacy",
+          "p": [
+            "How we handle data is explained in the privacy policy and on the security page."
+          ]
+        },
+        {
+          "h": "Changes",
+          "p": [
+            "If the terms change in a meaningful way, we'll announce it on the site or by email."
+          ]
+        },
+        {
+          "h": "Governing law",
+          "p": [
+            "These terms are governed by the laws of Israel."
+          ]
+        },
+        {
+          "h": "Contact",
+          "p": [
+            "Questions about the terms: {email}."
+          ]
+        }
+      ]
+    },
+    "contact": {
+      "title": "Contact",
+      "intro": "Have a question, an idea or a problem? We answer.",
+      "sections": [
+        {
+          "h": "Email",
+          "p": [
+            "{email}"
+          ]
+        },
+        {
+          "h": "Chat",
+          "p": [
+            "Every page has a chat bubble in the corner. Write in English or Hebrew."
+          ]
+        },
+        {
+          "h": "Report a problem",
+          "p": [
+            "From your account: the account menu, then \"Report a problem\"."
+          ]
+        }
+      ]
+    }
   },
   wrapped: {
     menu: "My {year} Wrapped",

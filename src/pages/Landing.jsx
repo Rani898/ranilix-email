@@ -10,6 +10,7 @@ import {
   Inbox,
   Languages,
   Lock,
+  Mail,
   Paperclip,
   ShieldCheck,
   Smartphone,
@@ -227,6 +228,48 @@ function Security() {
   );
 }
 
+/* ---------- What actually happens to your mail (trust) ---------- */
+
+function Trust() {
+  const { t } = useI18n();
+  const Card = ({ icon: Icon, title, items, tone }) => (
+    <div className="rounded-2xl border border-slate-200 bg-surface p-6 shadow-sm">
+      <div className="flex items-center gap-3">
+        <span className={`grid h-10 w-10 place-items-center rounded-xl ${tone}`}><Icon className="h-5 w-5" /></span>
+        <h3 className="text-lg font-bold text-slate-900">{title}</h3>
+      </div>
+      <ul className="mt-4 space-y-3">
+        {items.map((p) => (
+          <li key={p} className="flex items-start gap-2.5 text-sm leading-relaxed text-slate-700">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            <span>{p}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+  return (
+    <section id="trust" className="scroll-mt-20 bg-slate-50 py-20 sm:py-24">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6">
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="text-sm font-semibold text-brand-600">{t("trust.eyebrow")}</p>
+          <h2 className="mt-2 text-3xl font-extrabold tracking-tight text-balance text-slate-900 sm:text-4xl">{t("trust.title")}</h2>
+          <p className="mt-4 text-lg text-slate-600">{t("trust.desc")}</p>
+        </div>
+        <div className="mt-10 grid gap-6 lg:grid-cols-2">
+          <Card icon={Lock} title={t("trust.mailTitle")} items={t("trust.mail")} tone="bg-brand-50 text-brand-700" />
+          <Card icon={Mail} title={t("trust.gmailTitle")} items={t("trust.gmail")} tone="bg-rose-50 text-rose-600" />
+        </div>
+        <div className="mt-8 text-center">
+          <Link to="/security" className="inline-flex items-center gap-1.5 font-semibold text-brand-600 hover:text-brand-700">
+            {t("trust.more")} <ArrowRight className="h-4 w-4 rtl:rotate-180" />
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ---------- How it works ---------- */
 
 function HowItWorks() {
@@ -347,6 +390,7 @@ export default function Landing() {
         <TrustStrip />
         <Features />
         <Security />
+        <Trust />
         <HowItWorks />
         <Comparison />
         <FAQ />

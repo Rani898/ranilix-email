@@ -15,6 +15,7 @@ import Calendar from "./pages/Calendar.jsx";
 const DesignLab = lazy(() => import("./pages/DesignLab.jsx"));
 const Wrapped = lazy(() => import("./pages/Wrapped.jsx"));
 const SeoPage = lazy(() => import("./pages/SeoPage.jsx"));
+const InfoPage = lazy(() => import("./pages/InfoPage.jsx"));
 import { SEO_PATH_RE, useI18n } from "./lib/i18n.jsx";
 import { shareLang } from "./lib/pwa.js";
 import { captureRef } from "./lib/api.js";
@@ -65,6 +66,10 @@ export default function App() {
         <Route path="/hebrew-email" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
         <Route path="/guides" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
         <Route path="/guides/:slug" element={<Suspense fallback={null}><SeoPage /></Suspense>} />
+        <Route path="/about" element={<Suspense fallback={null}><InfoPage /></Suspense>} />
+        <Route path="/security" element={<Suspense fallback={null}><InfoPage /></Suspense>} />
+        <Route path="/terms" element={<Suspense fallback={null}><InfoPage /></Suspense>} />
+        <Route path="/contact" element={<Suspense fallback={null}><InfoPage /></Suspense>} />
         <Route path="*" element={<Landing />} />
       </Routes>
       {!onboarding && !pathname.startsWith("/admin") && !pathname.startsWith("/room") && !pathname.startsWith("/wrapped") && <SupportWidget />}
